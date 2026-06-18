@@ -1,0 +1,10 @@
+{
+  "folders": [
+    { "name": "workspace", "path": "." },
+    { "path": "repos/my-plants-species-schema" },
+    { "path": "repos/my-plants-knowledge-engine" },
+    { "path": "repos/my-plants-api" },
+    { "path": "repos/my-plants-web" }
+  ],
+  "settings": {}
+}
