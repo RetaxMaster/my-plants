@@ -49,14 +49,18 @@ my-plants/                       # root git repo (workspace)
   .code-workspace                # editor multi-root workspace
   .gitmodules                    # registers the subrepos below
   repos/
-    species-schema/              # SUBREPO: shared contract (Zod schema + types + validators)
-    knowledge-engine/            # SUBREPO: Claude research workspace (its own CLAUDE.md)
+    my-plants-species-schema/    # SUBREPO: shared contract (Zod schema + types + validators)
+    my-plants-knowledge-engine/  # SUBREPO: Claude research workspace (its own CLAUDE.md)
       .claude/agents/            #   research subagent(s)
       scripts/                   #   deterministic tools (validate, write record/brief, fetch)
       species/                   #   curated OUTPUT: <slug>/record.json + <slug>/brief.md
-    care-app-api/                # SUBREPO: NestJS backend
-    care-app-web/                # SUBREPO: Nuxt 3 frontend
+    my-plants-api/               # SUBREPO: NestJS backend
+    my-plants-web/               # SUBREPO: Nuxt 3 frontend
 ```
+
+All four submodules are public GitHub repositories under the `RetaxMaster` account, each
+prefixed `my-plants-` (mirroring the workspace name; the term "care app" below is a
+functional description, not a repo name).
 
 **Keeping the shared contract from drifting across subrepos.** The species schema is a
 contract shared by both subsystems, and the hardest-won lesson from past projects is that
@@ -114,12 +118,12 @@ deterministic scripts.
 
 ### Stack
 
-- **Backend — NestJS (`care-app-api`).** NestJS's first-class **module system** maps
+- **Backend — NestJS (`my-plants-api`).** NestJS's first-class **module system** maps
   directly onto the design's domain modules and gives clean, injectable boundaries — exactly
   the structure needed so multi-user is an additive change rather than a rewrite. It also
   ships `@nestjs/schedule` for the recompute cron and is the natural home for the future
   runtime-AI module without disturbing the rest.
-- **Frontend — Nuxt 3 + Vue 3 (`care-app-web`)** with **Nuxt UI** for accessible components
+- **Frontend — Nuxt 3 + Vue 3 (`my-plants-web`)** with **Nuxt UI** for accessible components
   and **`<script setup>` + TypeScript**. PWA-capable, which leaves the door open for push
   notifications later. Talks to the API over REST.
 - **Persistence — Prisma ORM over local MariaDB (no Docker).** A MariaDB server running
@@ -208,7 +212,7 @@ Each module is a clear, independently testable unit. Domain engines are **pure s
 
 1. `species-schema` (the contract everything depends on).
 2. `knowledge-engine` (produces the data the app needs) — its own implementation plan.
-3. `care-app-api` + `care-app-web` — its own implementation plan(s).
+3. `my-plants-api` + `my-plants-web` — its own implementation plan(s).
 
 ## Out of scope (v1)
 
