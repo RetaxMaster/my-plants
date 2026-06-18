@@ -34,41 +34,45 @@ without re-opening them.
 
 ---
 
-## Repository topology: a single workspace (npm workspaces)
+## Repository topology: a git workspace with subrepos (submodules)
 
-MyPlants is **one git repository** organized as an npm-workspaces monorepo, not a set of
-separate git subrepos.
-
-**Why a monorepo over separate subrepos:** the species schema is a contract shared by both
-subsystems. The hardest-won lesson from past projects is that *parallel copies of one
-surface drift apart*. Keeping the schema as a single internal package that both subsystems
-import makes drift structurally impossible. Separate repos would force us to copy or
-publish the schema and re-introduce that risk. Any subsystem can still be extracted to its
-own repo later; the shared contract is what we protect now.
+MyPlants is a **git workspace with subrepos**, mirroring the existing
+`retaxmaster-workspace` convention: a root git repository that holds shared docs, a
+developer `CLAUDE.md`/`AGENTS.md`, workspace scripts, and a `repos/` directory whose
+subsystems are **git submodules** — each its own independent repository.
 
 ```
-my-plants/
-  package.json                 # npm workspaces root
-  packages/
-    species-schema/            # SHARED CONTRACT: Zod schema + inferred TS types + validators
-  knowledge-engine/            # Claude-driven research workspace (its own CLAUDE.md)
-    .claude/agents/            # research subagent(s)
-    scripts/                   # deterministic tools (validate, write record/brief, fetch)
-    species/                   # curated OUTPUT: <slug>/record.json + <slug>/brief.md
-    CLAUDE.md                  # onboarding runbook for a fresh Claude
-  care-app-api/                # NestJS backend
-  care-app-web/                # Nuxt 3 frontend
-  docs/                        # specs, plans
+my-plants/                       # root git repo (workspace)
+  CLAUDE.md / AGENTS.md          # developer guide for the workspace
+  README.md
+  docs/                          # shared specs + plans (this file lives here)
+  .code-workspace                # editor multi-root workspace
+  .gitmodules                    # registers the subrepos below
+  repos/
+    species-schema/              # SUBREPO: shared contract (Zod schema + types + validators)
+    knowledge-engine/            # SUBREPO: Claude research workspace (its own CLAUDE.md)
+      .claude/agents/            #   research subagent(s)
+      scripts/                   #   deterministic tools (validate, write record/brief, fetch)
+      species/                   #   curated OUTPUT: <slug>/record.json + <slug>/brief.md
+    care-app-api/                # SUBREPO: NestJS backend
+    care-app-web/                # SUBREPO: Nuxt 3 frontend
 ```
 
-`species-schema`, `knowledge-engine`, `care-app-api`, and `care-app-web` are the four
-workspace packages.
+**Keeping the shared contract from drifting across subrepos.** The species schema is a
+contract shared by both subsystems, and the hardest-won lesson from past projects is that
+*parallel copies of one surface drift apart*. Because the subsystems are independent repos,
+`species-schema` is published and consumed as a **single versioned dependency** (a pinned
+git dependency / internal package), never copy-pasted. There is exactly one definition of
+the contract; consumers pin a version and a schema change is a deliberate version bump
+applied to every consumer in the same change. This preserves the no-drift guarantee within
+the subrepo model.
 
 ---
 
 ## The shared contract: `species-schema`
 
-- A standalone package exporting a **Zod schema** for a curated species record, the
+- A standalone **subrepo**, published and consumed as a single versioned dependency,
+  exporting a **Zod schema** for a curated species record, the
   **TypeScript types** inferred from it, and validation helpers.
 - Zod is chosen because it validates at runtime *and* derives static types from the same
   definition — one declaration is both the gate and the type. The knowledge engine uses it
@@ -118,9 +122,19 @@ deterministic scripts.
 - **Frontend — Nuxt 3 + Vue 3 (`care-app-web`)** with **Nuxt UI** for accessible components
   and **`<script setup>` + TypeScript**. PWA-capable, which leaves the door open for push
   notifications later. Talks to the API over REST.
-- **Persistence — Prisma ORM over SQLite (v1).** SQLite fits a local-first, single-user app
-  with zero infra. Prisma's schema is provider-agnostic, so moving to Postgres for
-  multi-user later is a configuration change, not a rewrite.
+- **Persistence — Prisma ORM over local MariaDB (no Docker).** A MariaDB server running
+  directly on the host (not containerized). Prisma uses its MySQL provider, which is
+  MariaDB-compatible. The same engine scales to multi-user later with no migration.
+  - **Connection via separate env vars, never a connection string.** The config exposes
+    `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` as independent variables.
+    The Prisma `DATABASE_URL` is **assembled internally at bootstrap** from those parts
+    (built in config and passed to `PrismaClient` via a `datasources` URL override) — the
+    connection string is never authored or stored by hand.
+  - **MariaDB date/time guard (critical for the date-heavy scheduling engine).** Never
+    compare date/time columns against `toISOString()` strings: MariaDB ignores the trailing
+    `Z` and may parse them in the session timezone, silently shifting due-date thresholds by
+    the UTC offset. Bind native `Date` objects (let the ORM stringify them in the connection
+    timezone) or use the DB's own `NOW()`. The connection timezone is fixed explicitly.
 - **Weather — Open-Meteo.** Free, no API key required (keeps the app secret-free and
   deterministic), and exposes temperature/humidity by latitude/longitude with forecast and
   historical data — everything the scheduling and viability engines need.
@@ -134,7 +148,7 @@ deterministic scripts.
   step loads these records into the app DB so the app can query species uniformly; the
   committed files remain the source of truth, the DB rows are a read cache.
 - **App transactional data** (owners, plants, places, cities, care history, feedback,
-  schedules) = SQLite via Prisma — mutable, per-owner, queried constantly.
+  schedules) = local MariaDB via Prisma — mutable, per-owner, queried constantly.
 
 ### NestJS module decomposition
 
