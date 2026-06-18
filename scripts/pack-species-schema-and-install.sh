@@ -26,6 +26,10 @@ for consumer in \
   my-plants-knowledge-engine \
   my-plants-api
 do
+  if [ ! -d "$ROOT_DIR/repos/$consumer" ]; then
+    echo "== Skipping $consumer (not present yet) =="
+    continue
+  fi
   echo "== Installing species-schema into $consumer =="
   npm --prefix "$ROOT_DIR/repos/$consumer" install "$TARBALL"
 done
