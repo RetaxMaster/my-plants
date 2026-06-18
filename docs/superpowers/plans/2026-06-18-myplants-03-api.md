@@ -8,7 +8,9 @@
 
 **Tech Stack:** NestJS 10, Prisma 5 (MySQL provider → MariaDB), Vitest (unit) + Nest e2e, Zod-validated config, Open-Meteo (no key). Consumes `@retaxmaster/my-plants-species-schema` (packed tarball).
 
-**Depends on:** Phase 1 (`my-plants-species-schema`) built; Phase 2 (`my-plants-knowledge-engine`) has produced at least one `species/<slug>/record.json` to seed. A local MariaDB server is running.
+**Depends on:** Phase 1 (`my-plants-species-schema`) built; a local MariaDB server is running. The
+`Species` table is populated by Phase 2 (`my-plants-knowledge-engine`)'s `db:insert` script — run
+it after this phase's Prisma migration creates the table and before this phase's e2e.
 
 ---
 
@@ -44,7 +46,7 @@ repos/my-plants-api/
       viability.ts       viability.test.ts
       adaptation.ts      adaptation.test.ts
     weather/{weather.module.ts,open-meteo.client.ts,weather.service.ts}
-    species/{species.module.ts,species.service.ts,species.seed.ts,species.controller.ts}
+    species/{species.module.ts,species.service.ts,species.controller.ts}
     cities/{cities.module.ts,cities.service.ts,cities.controller.ts}
     places/{places.module.ts,places.service.ts,places.controller.ts,place-conditions.ts}
     plants/{plants.module.ts,plants.service.ts,plants.controller.ts}
@@ -93,8 +95,7 @@ Create `repos/my-plants-api/package.json`:
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "seed": "tsx src/species/species.seed.ts"
+    "prisma:migrate": "prisma migrate dev"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.4",
@@ -1365,52 +1366,12 @@ import { OwnerService } from './owner.service.js';
 export class OwnerModule {}
 ```
 
-- [ ] **Step 2: Species seed (reads sibling repo, validates, idempotent upsert by slug)**
+- [ ] **Step 2: Species read service (rows are written by the knowledge engine)**
 
-Create `repos/my-plants-api/src/species/species.seed.ts`:
-
-```ts
-import { readdir, readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { PrismaClient } from '@prisma/client';
-import { parseSpeciesRecord, toSpeciesSlug } from '@retaxmaster/my-plants-species-schema';
-import { loadEnv } from '../config/env.js';
-import { buildDatabaseUrl } from '../config/database-url.js';
-
-// Default to the sibling knowledge-engine repo's curated output.
-const SPECIES_ROOT =
-  process.env.SPECIES_ROOT ?? path.resolve('..', 'my-plants-knowledge-engine', 'species');
-
-async function main(): Promise<void> {
-  const prisma = new PrismaClient({ datasources: { db: { url: buildDatabaseUrl(loadEnv()) } } });
-  const slugs = (await readdir(SPECIES_ROOT, { withFileTypes: true }))
-    .filter((d) => d.isDirectory())
-    .map((d) => d.name);
-
-  let count = 0;
-  for (const slug of slugs) {
-    const raw = await readFile(path.join(SPECIES_ROOT, slug, 'record.json'), 'utf8');
-    const record = parseSpeciesRecord(JSON.parse(raw)); // throws on invalid → seed fails loudly
-    const derived = toSpeciesSlug(record.scientificName);
-    if (derived !== slug) {
-      console.warn(`Folder "${slug}" != derived slug "${derived}" for ${record.scientificName}; keying by derived.`);
-    }
-    await prisma.species.upsert({
-      where: { slug: derived },
-      create: { slug: derived, scientificName: record.scientificName, record },
-      update: { scientificName: record.scientificName, record },
-    });
-    count += 1;
-  }
-  console.log(`Seeded ${count} species from ${SPECIES_ROOT}`);
-  await prisma.$disconnect();
-}
-
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
-```
+> The API does **not** seed species. The `Species` table is populated exclusively by
+> `my-plants-knowledge-engine`'s `db:insert` script (the single writer); the API only reads
+> the table. The Prisma migration here just creates the table shape (`slug`, `scientificName`,
+> `record`) that the knowledge engine writes to.
 
 Create `repos/my-plants-api/src/species/species.service.ts`:
 
@@ -1759,7 +1720,7 @@ Expected: PASS (engine tests still green; these modules are covered by the e2e i
 
 ```bash
 git -C repos/my-plants-api add src/owner src/species src/cities src/places src/plants
-git -C repos/my-plants-api commit -m "feat: add owner seam, species seed, and CRUD modules"
+git -C repos/my-plants-api commit -m "feat: add owner seam, species read, and CRUD modules"
 ```
 
 ---
@@ -2583,7 +2544,8 @@ import { ValidationPipe, type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { AppModule } from '../src/app.module.js';
 
-// Requires a running MariaDB with migrations applied and at least one seeded species.
+// Requires a running MariaDB with migrations applied and >=1 species row (inserted by the
+// knowledge engine's db:insert).
 describe('MyPlants API (e2e)', () => {
   let app: INestApplication;
 
@@ -2631,15 +2593,19 @@ describe('MyPlants API (e2e)', () => {
 
 - [ ] **Step 3: Run unit tests, build, then the e2e against a real DB**
 
-Run (inside `repos/my-plants-api`, with `DB_*` exported, MariaDB up, migrations applied, and a seeded species):
+Run (inside `repos/my-plants-api`, with `DB_*` exported, MariaDB up, and migrations applied).
+**Before the e2e, the `Species` table must hold ≥1 row** — populate it by running the
+knowledge engine's `db:insert` (Phase 2) against this DB:
 ```bash
 npm test
 npm run typecheck
 npm run build
-npm run seed
+# from the workspace root, after this migration: ( cd ../my-plants-knowledge-engine && npm run db:insert )
 npm run test:e2e
 ```
-Expected: unit tests green; typecheck clean; build succeeds; seed loads ≥1 species; the e2e creates the chain and asserts a computed plan. Fix any red at the root (per the no-workarounds rule) — never stub the failing path.
+Expected: unit tests green; typecheck clean; build succeeds; with ≥1 species present, the e2e
+creates the city→place→plant chain and asserts a computed plan. Fix any red at the root (per the
+no-workarounds rule) — never stub the failing path.
 
 - [ ] **Step 4: Commit**
 
@@ -2675,7 +2641,7 @@ git push origin main
 - Weather: Open-Meteo + cache TTL + fallback to stale/neutral (never hard-fail) → Task 10. ✅
 - Scheduling orchestration + daily cron + `today` endpoint (DATE granularity, primary-tz day boundary) → Task 11. ✅
 - Feedback (action/postpone/symptom) → adaptation + override; moving (simulate + scheduled via the `ScheduledMove` model + a 4 AM cron that applies due moves before the 5 AM recompute) → Task 12. ✅
-- Species seed: idempotent upsert by slug from the sibling repo, validated → Task 9. ✅
+- Species: API reads only; rows are written exclusively by the knowledge engine's `db:insert` (single writer; the migration owns the table shape) → Task 9. ✅
 - Notifications behind a channel interface (in-app v1) → Task 12. ✅
 - Submodule + workspace pointer → Tasks 1, 14. ✅
 

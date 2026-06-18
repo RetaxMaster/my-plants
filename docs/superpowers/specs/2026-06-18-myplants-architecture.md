@@ -266,15 +266,16 @@ clamped to `[minIntervalDays, maxIntervalDays]` derived from the species' drough
 - **A scheduled move's date** is interpreted in the canonical timezone; weather dates are
   interpreted in the relevant city's local time.
 
-### Species artifact sync (engine → app)
+### Species injection (engine → DB), single writer
 
-The repos are independent, so the flow is explicit: the app's **seed step reads the curated
-`record.json` files from a configurable path** (default: the sibling
-`repos/my-plants-knowledge-engine/species/` within the workspace), validates each with
-`my-plants-species-schema`, and **upserts** them into MariaDB keyed by the species slug.
-Seeding is **idempotent**: re-running updates existing rows by slug; a plant instance keeps
-referencing its species by slug. (Publishing the dataset as a standalone artifact is a
-future option; v1 reads the sibling repo's `species/` directory.)
+The repos are independent, and the **knowledge engine is the sole writer** of species rows.
+Its runbook's final step runs a deterministic `db:insert` script that re-validates every
+`species/<slug>/record.json` against `my-plants-species-schema` and **upserts** it into the
+`Species` table (keyed by the derived slug) via a direct DB connection. The researcher (a
+Claude/Claudex session) never writes rows by hand — it always goes through that script. The
+**API only reads** the `Species` table; it owns the table *shape* through its Prisma migration
+(`slug` PK, `scientificName`, `record` JSON), but never writes species. Insertion is
+idempotent (upsert by slug) and requires the migration to have created the table first.
 
 ### Indoor climate model
 

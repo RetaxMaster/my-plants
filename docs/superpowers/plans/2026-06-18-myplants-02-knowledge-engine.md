@@ -21,8 +21,10 @@
 - `repos/my-plants-knowledge-engine/scripts/lib/paths.ts` — resolve species artifact paths (pure).
 - `repos/my-plants-knowledge-engine/scripts/lib/validate.ts` — wrap the schema's safeParse into a result (pure).
 - `repos/my-plants-knowledge-engine/scripts/lib/artifacts.ts` — build the files to write from a record + brief (pure; uses the shared `toSpeciesSlug`).
+- `repos/my-plants-knowledge-engine/scripts/lib/db-row.ts` — build the DB row from a record (pure).
 - `repos/my-plants-knowledge-engine/scripts/validate.ts` — CLI: validate a draft record file.
 - `repos/my-plants-knowledge-engine/scripts/save.ts` — CLI: validate then write `species/<slug>/{record.json,brief.md}`.
+- `repos/my-plants-knowledge-engine/scripts/db-insert.ts` — CLI: re-validate `species/` records and upsert them into the API-owned `Species` table (mysql2). The runbook's final step.
 - `repos/my-plants-knowledge-engine/species/` — curated OUTPUT (committed).
 - `repos/my-plants-knowledge-engine/scripts/**/*.test.ts` — co-located tests.
 
@@ -61,9 +63,13 @@ Create `repos/my-plants-knowledge-engine/package.json`:
   "scripts": {
     "validate": "tsx scripts/validate.ts",
     "save": "tsx scripts/save.ts",
+    "db:insert": "tsx scripts/db-insert.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "mysql2": "^3.11.3"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
@@ -88,9 +94,25 @@ node_modules/
 *.draft.json
 *.draft.md
 *.tgz
+.env
 ```
 
 > Draft files produced mid-research are ignored; only validated artifacts under `species/` are committed.
+
+Create `repos/my-plants-knowledge-engine/.env.example` (the DB-insert script reads these):
+
+```dotenv
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=myplants
+DB_PASSWORD=123
+DB_NAME=myplants
+```
+
+> The DB schema (the `Species` table) is created by `my-plants-api`'s Prisma migration. The
+> `Species` row shape this script writes — `slug` (PK), `scientificName` (unique), `record`
+> (JSON) — is the contract; the knowledge engine is the **sole writer** of species rows, the
+> API only reads them.
 
 - [ ] **Step 4: Create `tsconfig.json`**
 
@@ -459,7 +481,7 @@ git -C repos/my-plants-knowledge-engine commit -m "feat: add artifact builder us
 
 ---
 
-## Task 5: `validate` and `save` CLIs
+## Task 5: `validate`, `save`, and `db:insert` CLIs
 
 **Files:**
 - Create: `repos/my-plants-knowledge-engine/scripts/validate.ts`
@@ -603,17 +625,143 @@ rm -rf /tmp/my-plants-species-smoke /tmp/draft.json /tmp/draft.md
 ```
 Expected: validate prints `✓ Valid…`; save writes into the temp root and `smoke OK` prints; the temp files are removed. **No real `species/` artifact is created or committed** — curated species data only ever comes from the real research workflow.
 
-- [ ] **Step 4: Run the full test suite and typecheck**
+- [ ] **Step 4: Write the failing test for the DB row builder (pure)**
+
+Create `repos/my-plants-knowledge-engine/scripts/lib/db-row.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+import type { SpeciesRecord } from '@retaxmaster/my-plants-species-schema';
+import { buildSpeciesRow } from './db-row.js';
+
+const record = {
+  scientificName: 'Nephrolepis exaltata',
+  commonNames: ['Boston fern'],
+  watering: { baseIntervalDays: 4, soilDrynessBeforeWatering: 'keep-moist', droughtTolerance: 'low', temperatureSensitivity: 'medium', lightSensitivity: 'medium', reduceInDormancy: false },
+  light: { minimum: 'medium', ideal: 'bright-indirect', maximum: 'bright-indirect' },
+  temperature: { survivalMinC: 7, idealMinC: 16, idealMaxC: 24, survivalMaxC: 30 },
+  humidity: { minimumPct: 50, idealPct: 80 },
+  fertilizing: { activeSeasons: ['spring', 'summer'], inSeasonFrequencyDays: 30, reduceInDormancy: true },
+  repotting: { typicalIntervalMonths: 18, signs: [] },
+  maintenance: { pruning: 'Trim dead fronds.', rotationDays: 14, leafCleaningDays: null, commonPests: [] },
+  nativeClimate: { description: 'Humid tropical forests.', hardinessMinC: 7, hardinessMaxC: 32 },
+  metadata: { confidence: 'high', sources: [{ title: 'RHS', url: 'https://www.rhs.org.uk/', accessedAt: '2026-06-18' }], briefPath: 'brief.md' },
+} satisfies SpeciesRecord;
+
+describe('buildSpeciesRow', () => {
+  it('derives slug + scientificName + a JSON record string', () => {
+    const row = buildSpeciesRow(record);
+    expect(row.slug).toBe('nephrolepis-exaltata');
+    expect(row.scientificName).toBe('Nephrolepis exaltata');
+    expect(JSON.parse(row.recordJson).light.ideal).toBe('bright-indirect');
+  });
+});
+```
+
+- [ ] **Step 5: Implement the row builder + the `db:insert` CLI**
+
+Create `repos/my-plants-knowledge-engine/scripts/lib/db-row.ts`:
+
+```ts
+import { toSpeciesSlug, type SpeciesRecord } from '@retaxmaster/my-plants-species-schema';
+
+export interface SpeciesRow {
+  slug: string;
+  scientificName: string;
+  recordJson: string;
+}
+
+export function buildSpeciesRow(record: SpeciesRecord): SpeciesRow {
+  return {
+    slug: toSpeciesSlug(record.scientificName),
+    scientificName: record.scientificName,
+    recordJson: JSON.stringify(record),
+  };
+}
+```
+
+Create `repos/my-plants-knowledge-engine/scripts/db-insert.ts` (the runbook's final step — the
+deterministic injector; the researcher never writes the DB by hand):
+
+```ts
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { createConnection } from 'mysql2/promise';
+import { buildSpeciesRow } from './lib/db-row.js';
+import { validateRecord } from './lib/validate.js';
+
+const SPECIES_ROOT = process.env.SPECIES_ROOT ?? 'species';
+
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v) {
+    console.error(`Missing env var ${name}. Copy .env.example to .env and export it.`);
+    process.exit(2);
+  }
+  return v;
+}
+
+async function main(): Promise<void> {
+  const root = path.resolve(SPECIES_ROOT);
+  const slugs = (await readdir(root, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);
+  if (slugs.length === 0) {
+    console.error(`No species found under ${root}. Run the research workflow (save) first.`);
+    process.exit(1);
+  }
+
+  const conn = await createConnection({
+    host: requireEnv('DB_HOST'),
+    port: Number(process.env.DB_PORT ?? 3306),
+    user: requireEnv('DB_USER'),
+    password: process.env.DB_PASSWORD ?? '',
+    database: requireEnv('DB_NAME'),
+  });
+
+  let count = 0;
+  for (const slug of slugs) {
+    const raw = await readFile(path.join(root, slug, 'record.json'), 'utf8');
+    const validated = validateRecord(JSON.parse(raw)); // re-validate before touching the DB
+    if (!validated.ok) {
+      console.error(`✗ ${slug} failed validation; not inserting:`);
+      for (const issue of validated.issues) console.error(`  - ${issue}`);
+      continue;
+    }
+    const row = buildSpeciesRow(validated.record);
+    // Idempotent upsert into the API-owned Species table (slug PK).
+    await conn.execute(
+      'INSERT INTO `Species` (`slug`, `scientificName`, `record`) VALUES (?, ?, ?) ' +
+        'ON DUPLICATE KEY UPDATE `scientificName` = VALUES(`scientificName`), `record` = VALUES(`record`)',
+      [row.slug, row.scientificName, row.recordJson],
+    );
+    console.log(`✓ Inserted/updated ${row.slug}`);
+    count += 1;
+  }
+
+  await conn.end();
+  console.log(`Done. ${count} species in the DB.`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+```
+
+- [ ] **Step 6: Run the full test suite and typecheck**
 
 Run: `npm test && npm run typecheck`
-Expected: all libs green and no type errors (confirms `@types/node` and the shared-schema types resolve).
+Expected: all libs green (incl. `db-row`) and no type errors.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git -C repos/my-plants-knowledge-engine add scripts/validate.ts scripts/save.ts
-git -C repos/my-plants-knowledge-engine commit -m "feat: add validate and save CLIs"
+git -C repos/my-plants-knowledge-engine add scripts/validate.ts scripts/save.ts scripts/db-insert.ts scripts/lib/db-row.ts scripts/lib/db-row.test.ts .env.example
+git -C repos/my-plants-knowledge-engine commit -m "feat: add validate/save/db:insert CLIs and the DB row builder"
 ```
+
+> The `db:insert` step requires the `Species` table to already exist (created by
+> `my-plants-api`'s Prisma migration) and the `DB_*` vars exported. It is the runbook's final
+> step (see Task 7).
 
 ---
 
@@ -720,6 +868,10 @@ the same shape every time.
    never overwritten by accident); only pass `--force` when you intend to replace it.
 6. Delete the temp drafts and report the two saved paths plus the record's
    `metadata.confidence` and source count.
+7. **Insert into the database (final step):** with the `DB_*` vars exported (copy `.env.example`
+   → `.env`), run `npm run db:insert`. This is the ONLY way knowledge enters the DB — never
+   write rows by hand. It re-validates every `species/<slug>/record.json` and upserts it into the
+   `Species` table (created by `my-plants-api`'s migration; that migration must have run first).
 
 ## Rules
 
@@ -775,6 +927,7 @@ Expected: the root records `.gitmodules`, the pinned submodule commit, and the h
 - Non-deterministic research subagent: trusted-source priority, ≥2-corroboration, confidence high/medium/low, conservative-on-conflict, prompt-injection hardening → Task 6. ✅
 - Deterministic scripts: validate (schema gate), save (writer) via `tsx` → Tasks 3, 5. ✅
 - Output `species/<slug>/record.json` + `brief.md`, committed; slug via the SHARED `toSpeciesSlug` (no fork) → Task 4 (artifacts) + Task 5 (save). ✅
+- Deterministic DB injection as the runbook's final step: `db:insert` re-validates and upserts into the API-owned `Species` table (knowledge engine = sole writer; researcher never writes rows by hand) → Task 5 (db-insert) + Task 7 (runbook). ✅
 - Schema gate before save → save CLI re-validates (Task 5) and the runbook forbids un-validated writes (Task 7). ✅
 - Submodule created + workspace pointer committed; pack script hardened for absent consumers → Tasks 1, 8. ✅
 
