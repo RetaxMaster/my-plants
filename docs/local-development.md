@@ -1,8 +1,13 @@
 # Local Development — MyPlants
 
 > v1 runs **only on localhost**. No Docker, no cloud. MariaDB runs directly on the host.
-> Some commands below reference submodules that may not exist yet while the project is being
-> built out; they become live as each repo is added under `repos/`.
+>
+> **The project is now implemented.** For the authoritative, verified run/stop commands, the
+> current ports (API 8000, web 8001), the DB credentials, what's already seeded, and the
+> deliberate deviations from the original plans, see **`docs/IMPLEMENTATION-STATUS.md`** — it is
+> the source of truth for running the app today. The subrepos are local git repos under
+> `repos/` (not yet GitHub submodules), so the submodule/push commands below are aspirational
+> until the GitHub repos are created.
 
 ## Prerequisites
 
