@@ -68,7 +68,8 @@ every onboarding.
 - **Humidity:** minimum / ideal.
 - **Fertilizing:** active season(s), in-season frequency, dormancy period.
 - **Repotting:** typical interval + signs that trigger it.
-- **Maintenance:** pruning, rotation, leaf cleaning, common pests.
+- **Maintenance:** pruning (seasonal guidance), `rotationDays` and `leafCleaningDays`
+  (numeric, schedulable cadences), common pests.
 - **Native climate / hardiness:** feeds the viability semaphore.
 
 **Metadata:** scientific name, common names, confidence level + cited sources, reference
@@ -127,7 +128,8 @@ each environmental variable is sourced from **whoever knows it best**:
   (moves, gifts, and exceptions are real; the app advises, it does not scold).
 - **Feedback loop** (closes the control loop):
   - *Action feedback:* logging "watered today" teaches the app the real cadence; consistent
-    early/late watering nudges the base interval.
+    early/late watering nudges the plant's per-plant interval adjustment (never the species
+    baseline).
   - *Postponement:* any task can be postponed. A one-off postpone just shifts the date;
     **repeated postpones** signal a mis-calibrated interval and adapt the plan.
   - *State feedback:* a periodic check-in ("how does it look?") with symptom options
@@ -141,8 +143,8 @@ each environmental variable is sourced from **whoever knows it best**:
 
 ### Deferred to the care-app spec
 
-- **How reminders reach the user** (in-app, email, push): tech-dependent; the stack is not
-  yet chosen, so this is decided in the app's own spec.
+- **How reminders reach the user:** v1 is **in-app** (per the architecture spec); email and
+  push channels are deferred behind a notification-channel interface.
 
 ---
 
@@ -155,6 +157,18 @@ each environmental variable is sourced from **whoever knows it best**:
 ## Non-goals (v1)
 
 - The app does not physically care for plants; it only advises.
+- No automated actuator/sensor/control integrations — the app never reads a moisture
+  probe or triggers a pump; it advises a human.
 - No runtime AI in the care app.
 - No multi-user accounts in v1.
-- No prescribed technology stack yet (chosen per-subsystem at planning time).
+- The technology stack is defined in the companion architecture spec
+  (`2026-06-18-myplants-architecture.md`); this design spec stays stack-agnostic on purpose.
+
+## Notes on the feedback loop and the brief (clarifications)
+
+- **Feedback adapts per-plant state, never species truth.** The curated species record is
+  immutable read-only data. Adaptation from logged actions, postponements, and symptoms
+  produces a *per-plant* adjustment (kept with an audit trail), layered on top of the
+  species baseline — it never edits the species record.
+- **The Markdown brief is not served by the app in v1.** It is stored alongside the curated
+  record for human reading; surfacing it in the UI is a later, optional addition.

@@ -65,17 +65,17 @@ functional description, not a repo name).
 **Keeping the shared contract from drifting across subrepos.** The species schema is a
 contract shared by both subsystems, and the hardest-won lesson from past projects is that
 *parallel copies of one surface drift apart*. Because the subsystems are independent repos,
-`species-schema` is published and consumed as a **single versioned dependency** (a pinned
-git dependency / internal package), never copy-pasted. There is exactly one definition of
-the contract; consumers pin a version and a schema change is a deliberate version bump
-applied to every consumer in the same change. This preserves the no-drift guarantee within
-the subrepo model.
+`my-plants-species-schema` is consumed as a **packed, version-pinned npm dependency** —
+built and installed into each consumer via `scripts/pack-species-schema-and-install.sh`
+(the dependency-order rule), never copy-pasted. There is exactly one definition of the
+contract; a schema change is a deliberate version bump propagated to every consumer in the
+same change. This preserves the no-drift guarantee within the subrepo model.
 
 ---
 
 ## The shared contract: `species-schema`
 
-- A standalone **subrepo**, published and consumed as a single versioned dependency,
+- A standalone **subrepo**, consumed as a packed, version-pinned npm dependency,
   exporting a **Zod schema** for a curated species record, the
   **TypeScript types** inferred from it, and validation helpers.
 - Zod is chosen because it validates at runtime *and* derives static types from the same
@@ -134,6 +134,11 @@ deterministic scripts.
     The Prisma `DATABASE_URL` is **assembled internally at bootstrap** from those parts
     (built in config and passed to `PrismaClient` via a `datasources` URL override) — the
     connection string is never authored or stored by hand.
+  - **Prisma CLI workflow (migrate / generate / seed):** the CLI also needs a datasource
+    URL. It is composed from the same `DB_*` vars by a small env step (a script that exports
+    a `DATABASE_URL` into the CLI's environment from the parts, or a generated git-ignored
+    `.env`) — the URL is still never hand-authored or committed. Exact wiring is fixed in the
+    `my-plants-api` plan.
   - **MariaDB date/time guard (critical for the date-heavy scheduling engine).** Never
     compare date/time columns against `toISOString()` strings: MariaDB ignores the trailing
     `Z` and may parse them in the session timezone, silently shifting due-date thresholds by
@@ -208,10 +213,128 @@ Each module is a clear, independently testable unit. Domain engines are **pure s
 
 ---
 
+## Resolved decisions (data model, time, contracts)
+
+These pin down areas that would otherwise be ambiguous at implementation time. Exact
+numeric coefficients (e.g. how strongly "high temperature sensitivity" shortens an
+interval) and worked examples are tuned and tested in the implementation plans, not here;
+everything below is the binding shape those coefficients must respect.
+
+### What is persisted (vs computed)
+
+Care is computed, never stored as a fixed calendar. The persisted entities are:
+
+- **Species baseline** — immutable, read-only curated data (seeded from the engine).
+- **Plant per-task adjustment** — a per-plant, per-task learned modifier (a multiplier on
+  the base interval) layered on top of the species baseline. This is where adaptation
+  lives; the species record is never mutated.
+- **Care event log** — append-only records of `watered` / `fertilized` / `repotted` /
+  `postponed` / `symptom-reported`, each timestamped. The source of truth for history and
+  the input to adaptation.
+- **One-off task override** — an explicit next-due date for a single task occurrence (what
+  a single postpone writes); it shifts only that occurrence and does not change the learned
+  adjustment.
+- **Due-date cache** — the computed next-due date per plant/task, recomputed by the cron
+  and on relevant events. A cache, never authoritative; safe to drop and rebuild.
+
+### Scheduling computation contract
+
+`nextDue = lastDone + round( baseIntervalDays × Madj × Mtemp × Mlight × Mseason )`, then
+clamped to `[minIntervalDays, maxIntervalDays]` derived from the species' drought tolerance.
+
+- **Inputs:** species baseline, the plant's effective place conditions, current
+  weather/season for the place's city, and the plant's learned per-task adjustment `Madj`.
+- **Modulators** are multiplicative and default to `1.0`. **Missing data is neutral:** if
+  weather is unavailable, `Mtemp = Mseason = 1.0` (the schedule degrades to the baseline,
+  never errors).
+- **Indoor plants** ignore live outdoor weather for `Mtemp` (see the indoor model); only
+  outdoor places are modulated by real weather.
+- A one-off override replaces the computed `nextDue` for that occurrence only.
+- **First-due anchor (registration).** A freshly registered plant has no `lastDone` per
+  task. At registration the owner may enter the last date each task was done; for any task
+  left blank, the anchor defaults to the plant's acquisition/registration date — so the
+  first `nextDue` is `anchor + baseInterval`. This makes onboarding and seeding deterministic.
+
+### Time & timezone semantics
+
+- **Canonical timezone:** the owner's primary city local time (v1 has one owner and one
+  primary garden city). All day boundaries use it.
+- **Due dates use daily (`DATE`) granularity** — care tasks are day-scoped, not minute-scoped.
+- **"Today's tasks"** = tasks whose `nextDue` (a `DATE`) is `≤ today` in that timezone.
+- Dates are bound as native `Date` objects (never `toISOString()` strings); the MariaDB
+  connection timezone is fixed explicitly.
+- **A scheduled move's date** is interpreted in the canonical timezone; weather dates are
+  interpreted in the relevant city's local time.
+
+### Species artifact sync (engine → app)
+
+The repos are independent, so the flow is explicit: the app's **seed step reads the curated
+`record.json` files from a configurable path** (default: the sibling
+`repos/my-plants-knowledge-engine/species/` within the workspace), validates each with
+`my-plants-species-schema`, and **upserts** them into MariaDB keyed by the species slug.
+Seeding is **idempotent**: re-running updates existing rows by slug; a plant instance keeps
+referencing its species by slug. (Publishing the dataset as a standalone artifact is a
+future option; v1 reads the sibling repo's `species/` directory.)
+
+### Indoor climate model
+
+For indoor places the effective conditions are derived deterministically:
+
+- If the owner gives a **typical temperature range**, use its midpoint, nudged slightly by
+  season. If the place is **climate-controlled**, treat temperature as effectively constant.
+- Otherwise, model indoor temperature as a **damped** version of the city's weather (pulled
+  toward a stable comfort baseline), so indoor plants react far less to outdoor swings.
+- Humidity defaults to a fixed indoor baseline unless the place is flagged **humid** (e.g.
+  a bathroom), which raises it. Outdoor places take temperature/humidity straight from weather.
+
+### Weather caching & fallback
+
+- Weather is fetched per city and **cached** (TTL on the order of hours); the daily
+  recompute uses the cache.
+- On an Open-Meteo failure, the **most recent cached reading is reused** and the recompute
+  proceeds; it never hard-fails. Forecast data drives upcoming due dates (historical data
+  is not needed for v1).
+
+### Viability semaphore output contract
+
+- Three informative levels: **`good`**, **`caution`**, **`poor`** — never blocking.
+- Computed by comparing the place's effective conditions + the city's seasonal extremes
+  against the species tolerances (temperature survival bounds, minimum light, minimum
+  humidity, native hardiness).
+- Always returns a **human-readable reason list** naming each tolerance at risk (e.g.
+  "winter low 6 °C is below the 10 °C survival minimum"), so the owner understands the call.
+
+### Moving model boundaries
+
+- A move targets the owner's **primary garden city**. A scheduled move, on its date, repoints
+  outdoor places to the new city's weather and re-derives indoor places' stabilized model
+  from it, then recomputes the whole garden's due dates.
+- **Historical care events are preserved**; only forward-looking computation changes. The
+  what-if simulator computes the same deltas **without mutating** anything.
+
+### Task taxonomy (v1)
+
+- **Independently scheduled tasks:** watering, fertilizing, repotting, rotation
+  (`rotationDays`), and leaf cleaning (`leafCleaningDays`).
+- **Informational guidance (surfaced, not separately scheduled):** pruning (seasonal note)
+  and common pests (what to watch for). Pest checks ride along with the periodic state
+  check-in rather than being a separate recurring due date.
+
+### Knowledge-engine research source policy
+
+- Care values require **at least two reputable corroborating sources**; source priority is
+  botanical authorities / extension services > established horticulture references > general
+  sites; forums are weak signals only.
+- **Confidence:** `high` when corroborated by ≥2 authorities, `medium` on a single authority
+  or minor disagreement, `low` on sparse/conflicting data.
+- On conflict, choose the **conservative** care value and lower the confidence.
+
+---
+
 ## Build order
 
-1. `species-schema` (the contract everything depends on).
-2. `knowledge-engine` (produces the data the app needs) — its own implementation plan.
+1. `my-plants-species-schema` (the contract everything depends on).
+2. `my-plants-knowledge-engine` (produces the data the app needs) — its own implementation plan.
 3. `my-plants-api` + `my-plants-web` — its own implementation plan(s).
 
 ## Out of scope (v1)
