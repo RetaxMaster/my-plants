@@ -396,6 +396,8 @@ model Owner {
   cities City[]
   places Place[]
   plants Plant[]
+
+  @@map("owners")
 }
 
 model City {
@@ -410,6 +412,7 @@ model City {
   places    Place[]
 
   @@index([ownerId])
+  @@map("cities")
 }
 
 model Place {
@@ -429,6 +432,7 @@ model Place {
 
   @@index([ownerId])
   @@index([cityId])
+  @@map("places")
 }
 
 model Species {
@@ -436,6 +440,8 @@ model Species {
   scientificName String  @unique
   record         Json
   plants         Plant[]
+
+  @@map("species")
 }
 
 model Plant {
@@ -457,6 +463,7 @@ model Plant {
 
   @@index([ownerId])
   @@index([placeId])
+  @@map("plants")
 }
 
 model CareEvent {
@@ -470,6 +477,7 @@ model CareEvent {
   createdAt  DateTime      @default(now())
 
   @@index([plantId, task])
+  @@map("care_events")
 }
 
 model PlantTaskAdjustment {
@@ -481,6 +489,7 @@ model PlantTaskAdjustment {
   updatedAt  DateTime @updatedAt
 
   @@unique([plantId, task])
+  @@map("plant_task_adjustments")
 }
 
 model TaskOverride {
@@ -491,6 +500,7 @@ model TaskOverride {
   nextDueOn DateTime @db.Date
 
   @@unique([plantId, task])
+  @@map("task_overrides")
 }
 
 model DueCache {
@@ -502,6 +512,7 @@ model DueCache {
   computedAt DateTime @default(now())
 
   @@unique([plantId, task])
+  @@map("due_caches")
 }
 
 model ScheduledMove {
@@ -513,8 +524,16 @@ model ScheduledMove {
   createdAt    DateTime @default(now())
 
   @@index([ownerId])
+  @@map("scheduled_moves")
 }
 ```
+
+> **Table naming convention:** every model carries an `@@map(...)` so the physical tables are
+> **snake_case plural** (`owners`, `cities`, `places`, `species`, `plants`, `care_events`,
+> `plant_task_adjustments`, `task_overrides`, `due_caches`, `scheduled_moves`) while the Prisma
+> model names stay PascalCase. Prisma model field names remain the column names (camelCase, e.g.
+> `scientificName`); the knowledge engine's raw-SQL `db:insert` targets `species` with those
+> exact column names.
 
 - [ ] **Step 2: Add the `prisma:env` helper that composes the CLI datasource URL**
 

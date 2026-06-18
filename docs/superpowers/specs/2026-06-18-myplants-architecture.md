@@ -271,11 +271,15 @@ clamped to `[minIntervalDays, maxIntervalDays]` derived from the species' drough
 The repos are independent, and the **knowledge engine is the sole writer** of species rows.
 Its runbook's final step runs a deterministic `db:insert` script that re-validates every
 `species/<slug>/record.json` against `my-plants-species-schema` and **upserts** it into the
-`Species` table (keyed by the derived slug) via a direct DB connection. The researcher (a
+`species` table (keyed by the derived slug) via a direct DB connection. The researcher (a
 Claude/Claudex session) never writes rows by hand — it always goes through that script. The
-**API only reads** the `Species` table; it owns the table *shape* through its Prisma migration
+**API only reads** the `species` table; it owns the table *shape* through its Prisma migration
 (`slug` PK, `scientificName`, `record` JSON), but never writes species. Insertion is
 idempotent (upsert by slug) and requires the migration to have created the table first.
+
+**Table naming convention:** physical tables are **snake_case plural** (`owners`, `cities`,
+`places`, `species`, `plants`, `care_events`, `plant_task_adjustments`, `task_overrides`,
+`due_caches`, `scheduled_moves`), mapped from PascalCase Prisma models via `@@map`.
 
 ### Indoor climate model
 

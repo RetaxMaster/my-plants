@@ -109,10 +109,10 @@ DB_PASSWORD=123
 DB_NAME=myplants
 ```
 
-> The DB schema (the `Species` table) is created by `my-plants-api`'s Prisma migration. The
-> `Species` row shape this script writes — `slug` (PK), `scientificName` (unique), `record`
-> (JSON) — is the contract; the knowledge engine is the **sole writer** of species rows, the
-> API only reads them.
+> The DB schema (the `species` table — snake_case plural) is created by `my-plants-api`'s
+> Prisma migration. The row shape this script writes — `slug` (PK), `scientificName` (unique),
+> `record` (JSON) — is the contract; the knowledge engine is the **sole writer** of species
+> rows, the API only reads them.
 
 - [ ] **Step 4: Create `tsconfig.json`**
 
@@ -727,9 +727,9 @@ async function main(): Promise<void> {
       continue;
     }
     const row = buildSpeciesRow(validated.record);
-    // Idempotent upsert into the API-owned Species table (slug PK).
+    // Idempotent upsert into the API-owned `species` table (snake_case plural; slug PK).
     await conn.execute(
-      'INSERT INTO `Species` (`slug`, `scientificName`, `record`) VALUES (?, ?, ?) ' +
+      'INSERT INTO `species` (`slug`, `scientificName`, `record`) VALUES (?, ?, ?) ' +
         'ON DUPLICATE KEY UPDATE `scientificName` = VALUES(`scientificName`), `record` = VALUES(`record`)',
       [row.slug, row.scientificName, row.recordJson],
     );
@@ -871,7 +871,7 @@ the same shape every time.
 7. **Insert into the database (final step):** with the `DB_*` vars exported (copy `.env.example`
    → `.env`), run `npm run db:insert`. This is the ONLY way knowledge enters the DB — never
    write rows by hand. It re-validates every `species/<slug>/record.json` and upserts it into the
-   `Species` table (created by `my-plants-api`'s migration; that migration must have run first).
+   `species` table (created by `my-plants-api`'s migration; that migration must have run first).
 
 ## Rules
 
