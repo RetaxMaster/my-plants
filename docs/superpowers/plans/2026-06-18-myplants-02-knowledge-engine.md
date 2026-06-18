@@ -868,10 +868,12 @@ the same shape every time.
    never overwritten by accident); only pass `--force` when you intend to replace it.
 6. Delete the temp drafts and report the two saved paths plus the record's
    `metadata.confidence` and source count.
-7. **Insert into the database (final step):** with the `DB_*` vars exported (copy `.env.example`
-   → `.env`), run `npm run db:insert`. This is the ONLY way knowledge enters the DB — never
-   write rows by hand. It re-validates every `species/<slug>/record.json` and upserts it into the
-   `species` table (created by `my-plants-api`'s migration; that migration must have run first).
+7. **Insert into the database (final step):** copy `.env.example` → `.env`, then run
+   `set -a; source .env; set +a && npm run db:insert` (tsx does **not** auto-load `.env`, so the
+   `DB_*` vars must be exported into the environment first). This is the ONLY way knowledge
+   enters the DB — never write rows by hand. It re-validates every `species/<slug>/record.json`
+   and upserts it into the `species` table (created by `my-plants-api`'s migration; that
+   migration must have run first).
 
 ## Rules
 

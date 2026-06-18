@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the deterministic care engine as a NestJS API over local MariaDB (Prisma): it seeds curated species, models each plant's environment, and computes/serves the care plan (scheduling, viability, feedback adaptation, moving) — with no runtime AI.
+**Goal:** Build the deterministic care engine as a NestJS API over local MariaDB (Prisma): it reads curated species (written by the knowledge engine), models each plant's environment, and computes/serves the care plan (scheduling, viability, feedback adaptation, moving) — with no runtime AI.
 
 **Architecture:** A NestJS app at `repos/my-plants-api`. The domain logic lives in **pure, I/O-free services** (scheduling, indoor-climate, viability, adaptation) that are unit-tested in isolation; Nest modules wire them to Prisma repositories, the Open-Meteo weather client, and HTTP controllers. Everything is scoped by `ownerId` (single owner in v1, resolved by a stub). The connection string is assembled at runtime from separate `DB_*` env vars.
 
@@ -16,7 +16,7 @@ it after this phase's Prisma migration creates the table and before this phase's
 
 ## Data model & engine contracts (binding for this phase)
 
-Persisted (Prisma models): `Owner`, `City`, `Place`, `Species` (seeded cache), `Plant`,
+Persisted (Prisma models): `Owner`, `City`, `Place`, `Species` (read cache; written by the knowledge engine), `Plant`,
 `CareEvent` (append-only log), `PlantTaskAdjustment` (per-plant learned multiplier),
 `TaskOverride` (one-off next-due), `DueCache` (rebuildable). Tasks tracked: `WATER`,
 `FERTILIZE`, `REPOT`, `ROTATE`, `CLEAN_LEAVES`.
@@ -1342,7 +1342,7 @@ git -C repos/my-plants-api commit -m "feat: add pure adaptation engine"
 
 ---
 
-## Task 9: Owner seam + Prisma-backed modules (cities, places, plants, species seed)
+## Task 9: Owner seam + Prisma-backed modules (cities, places, plants, species read)
 
 > These modules are thin Prisma wiring. Each `*.service.ts` scopes queries by `ownerId`; the
 > `OwnerService` resolves the single default owner (creating it on first use) so multi-user is
@@ -2619,7 +2619,8 @@ knowledge engine's `db:insert` (Phase 2) against this DB:
 npm test
 npm run typecheck
 npm run build
-# from the workspace root, after this migration: ( cd ../my-plants-knowledge-engine && npm run db:insert )
+# after this migration, populate species (from the knowledge engine, with its .env sourced):
+#   ( cd ../my-plants-knowledge-engine && set -a; source .env; set +a && npm run db:insert )
 npm run test:e2e
 ```
 Expected: unit tests green; typecheck clean; build succeeds; with ≥1 species present, the e2e
@@ -2666,4 +2667,4 @@ git push origin main
 
 **Placeholder scan:** Pure engines, config, Prisma schema (incl. `ScheduledMove`), weather, care-plan, cities, places, plants (with DTOs + first-due anchors), moving (service + controller + cron + module), feedback, and the e2e are all complete code. Feedback's controller/module are described (one endpoint) but the service is full. No "TODO"/"TBD".
 
-**Type consistency:** `effectiveConditions`/`computeNextDue`/`assessViability`/`nextAdjustment` signatures match their callers in `care-plan.service.ts`/`feedback.service.ts`. Prisma enum names (`Task`, `LightType`, `HumidityCharacter`, `CareEventType`) are used consistently. `buildDatabaseUrl` is shared by the runtime `PrismaService`, the seed, and the CLI env writer. Imports from `@retaxmaster/my-plants-species-schema` (`parseSpeciesRecord`, `toSpeciesSlug`, `LIGHT_LEVELS`, types) match the Phase 1 barrel.
+**Type consistency:** `effectiveConditions`/`computeNextDue`/`assessViability`/`nextAdjustment` signatures match their callers in `care-plan.service.ts`/`feedback.service.ts`. Prisma enum names (`Task`, `LightType`, `HumidityCharacter`, `CareEventType`) are used consistently. `buildDatabaseUrl` is shared by the runtime `PrismaService` and the CLI env writer. Imports from `@retaxmaster/my-plants-species-schema` (`parseSpeciesRecord`, `toSpeciesSlug`, `LIGHT_LEVELS`, types) match the Phase 1 barrel.
