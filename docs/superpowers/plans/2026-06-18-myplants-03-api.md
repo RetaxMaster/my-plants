@@ -208,12 +208,12 @@ dist/
 Create `repos/my-plants-api/.env.example`:
 
 ```dotenv
-DB_HOST=127.0.0.1
+DB_HOST=localhost
 DB_PORT=3306
-DB_USER=my_plants
-DB_PASSWORD=change-me
-DB_NAME=my_plants
-PORT=3000
+DB_USER=myplants
+DB_PASSWORD=123
+DB_NAME=myplants
+PORT=8000
 # Primary garden city (used for weather + canonical timezone). Overridable via the API.
 DEFAULT_CITY_TZ=America/Mexico_City
 ```

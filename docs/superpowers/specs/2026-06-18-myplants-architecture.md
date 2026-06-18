@@ -331,6 +331,10 @@ For indoor places the effective conditions are derived deterministically:
 
 ---
 
+## Runtime ports (local dev)
+
+- API: **8000**; web: **8001**. The Open-Meteo and DB connections are unaffected.
+
 ## Build order
 
 1. `my-plants-species-schema` (the contract everything depends on).
