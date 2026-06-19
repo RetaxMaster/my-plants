@@ -61,10 +61,9 @@ runbook), give it a scientific name, and follow the workflow; its final step,
 
 ## Deliberate deviations from the plans (decided + documented)
 
-- **Local git repos, not GitHub submodules (yet).** Push / `gh repo create` / `git submodule add`
-  / workspace pointer-bumps were **deferred** — CLAUDE.md reserves push for explicit approval and
-  you were away. Each subrepo has full local history, ready to push when you create the GitHub
-  repos and register them as submodules.
+- **GitHub submodules (done 2026-06-19).** The four product repos are public on GitHub under
+  `RetaxMaster` and registered as git submodules of the `RetaxMaster/my-plants` workspace; the
+  workspace pins each one's pushed commit. Clone with `git clone --recurse-submodules`.
 - **Prisma `migrate deploy` (not `migrate dev`).** The `myplants` user lacks the global `CREATE`
   privilege Prisma's shadow DB needs; the migration SQL was generated with `prisma migrate diff`
   and applied with `migrate deploy`. `package.json` reflects this (`prisma:migrate` = deploy;
