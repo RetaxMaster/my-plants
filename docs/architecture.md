@@ -52,8 +52,8 @@ Domain modules, each an independently testable unit; the engines are **pure serv
 ## One data store (local MariaDB)
 
 - **Curated species knowledge** lives in the `species` table — the structured `record` (JSON)
-  plus the human-readable `brief` (Markdown), both written by the knowledge engine's
-  deterministic `db:insert` (the single writer). The DB is the **single source of truth**; the
+  plus the human-readable brief in both English and Spanish (`brief_en` / `brief_es`, Markdown),
+  all written by the knowledge engine's deterministic `db:insert` (the single writer). The DB is the **single source of truth**; the
   files Claude generates during research are ephemeral drafts, never committed. Before
   researching, the engine runs `db:get` (dedupe by deterministic slug) and, if the species
   already exists, enriches the stored record + brief instead of duplicating it.
