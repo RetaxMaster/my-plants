@@ -30,22 +30,27 @@ has no nickname; CORS is restricted to the web origin. (Viability `reasons` is e
 
 Prerequisites: local MariaDB up (it is), database `myplants`, user `myplants`, password `123`.
 
-**API (port 8000):**
+**Easiest — both services from the workspace root:**
 ```bash
-cd repos/my-plants-api
-# .env.local already holds the DB_* vars + PORT=8000
-set -a; source .env.local; set +a
-npm run build && node dist/main.js      # → http://localhost:8000
+./run.sh          # API (8000) + web (8001), prefixed output
 ```
+The API loads its own `.env` automatically (via dotenv) — no manual `source` needed. Just make
+sure `repos/my-plants-api/.env` exists (copy it from `.env.example` the first time).
 
-**Web (port 8001):**
+**Or each service on its own:**
 ```bash
-cd repos/my-plants-web
-npm run dev                              # → http://localhost:8001
+cd repos/my-plants-api && npm run build && node dist/main.js   # → http://localhost:8000
+cd repos/my-plants-web && npm run dev                          # → http://localhost:8001
 ```
 
 Open http://localhost:8001 and create a City → Place → Plant; the Today page shows the computed
-care tasks. To stop: `pkill -f "dist/main.js"; pkill -f nuxt`.
+care tasks. To stop: Ctrl-C on `./run.sh`, or `pkill -f "my-plants-api/dist/main"; pkill -f nuxt`
+(the broader `dist/main` pattern matches both the `./run.sh`/watch launch and `node dist/main.js`).
+
+**Env files (API):** `.env` holds the app config (`DB_*`, `PORT`, `DEFAULT_CITY_TZ`, `WEB_ORIGIN`)
+and is loaded automatically. Prisma's composed `DATABASE_URL` is generated into `prisma/.env` by
+`npm run prisma:env` (kept separate so it never clobbers the app's `.env`). Only `.env.example` is
+tracked.
 
 ## Adding more species (knowledge engine)
 

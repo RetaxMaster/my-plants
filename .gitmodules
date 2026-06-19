@@ -1,0 +1,12 @@
+[submodule "repos/my-plants-species-schema"]
+	path = repos/my-plants-species-schema
+	url = git@github.com:RetaxMaster/my-plants-species-schema.git
+[submodule "repos/my-plants-knowledge-engine"]
+	path = repos/my-plants-knowledge-engine
+	url = git@github.com:RetaxMaster/my-plants-knowledge-engine.git
+[submodule "repos/my-plants-api"]
+	path = repos/my-plants-api
+	url = git@github.com:RetaxMaster/my-plants-api.git
+[submodule "repos/my-plants-web"]
+	path = repos/my-plants-web
+	url = git@github.com:RetaxMaster/my-plants-web.git

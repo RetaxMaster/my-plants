@@ -31,18 +31,20 @@ git submodule update --init --recursive
 ## Database & environment variables
 
 The connection is assembled internally from **separate** variables — never a connection
-string. Each service reads them from its own `.env` (only `.env.example` is tracked):
+string. The API reads them from its own `.env` (only `.env.example` is tracked); copy the
+example once and the app loads it automatically at startup (via dotenv — no manual `source`):
 
 ```bash
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_USER=my_plants
-DB_PASSWORD=<local password>
-DB_NAME=my_plants
+cp repos/my-plants-api/.env.example repos/my-plants-api/.env
+# .env holds: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, PORT, DEFAULT_CITY_TZ, WEB_ORIGIN
 ```
 
+Prisma's CLI needs a composed `DATABASE_URL`; `npm run prisma:env` generates it into a
+**separate** `prisma/.env` (so it never overwrites the app's `.env`). `prisma:generate` and
+`prisma:migrate` run that step for you.
+
 Create the database and user once in your local MariaDB, then apply the API's Prisma
-migrations (command documented in `repos/my-plants-api` once it exists).
+migrations: `npm --prefix repos/my-plants-api run prisma:migrate`.
 
 ## Running
 
