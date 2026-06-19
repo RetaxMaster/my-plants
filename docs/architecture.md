@@ -49,12 +49,16 @@ Domain modules, each an independently testable unit; the engines are **pure serv
 - `moving` — what-if simulation + scheduled city switch.
 - `notifications` — surfaces due tasks (v1: in-app, behind a channel interface).
 
-## Two data stores
+## One data store (local MariaDB)
 
-- **Curated species knowledge:** file-based `record.json` + `brief.md` produced by the
-  engine (version-controlled), seeded into the app DB as a read cache.
-- **App transactional data:** local MariaDB via Prisma, assembled from separate `DB_*` env
-  vars (never a connection string). Date/time handling follows the MariaDB rule in the
+- **Curated species knowledge** lives in the `species` table — the structured `record` (JSON)
+  plus the human-readable `brief` (Markdown), both written by the knowledge engine's
+  deterministic `db:insert` (the single writer). The DB is the **single source of truth**; the
+  files Claude generates during research are ephemeral drafts, never committed. Before
+  researching, the engine runs `db:get` (dedupe by deterministic slug) and, if the species
+  already exists, enriches the stored record + brief instead of duplicating it.
+- **App transactional data:** the same local MariaDB via Prisma, assembled from separate `DB_*`
+  env vars (never a connection string). Date/time handling follows the MariaDB rule in the
   constitution.
 
 ## Build order
