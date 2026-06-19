@@ -53,10 +53,13 @@ Domain modules, each an independently testable unit; the engines are **pure serv
 
 - **Curated species knowledge** lives in the `species` table — the structured `record` (JSON)
   plus the human-readable brief in both English and Spanish (`brief_en` / `brief_es`, Markdown),
-  all written by the knowledge engine's deterministic `db:insert` (the single writer). The DB is the **single source of truth**; the
-  files Claude generates during research are ephemeral drafts, never committed. Before
-  researching, the engine runs `db:get` (dedupe by deterministic slug) and, if the species
-  already exists, enriches the stored record + brief instead of duplicating it.
+  all written by the knowledge engine's deterministic `db:insert` (the single writer). The
+  `record` includes an **informational `cultivars`** list (named varieties such as 'Massangeana'
+  — identity/appearance for humans, never care overrides), so the deterministic care engine never
+  branches on cultivar. The DB is the **single source of truth**; the files Claude generates
+  during research are ephemeral drafts, never committed. Before researching, the engine reads the
+  catalog (`db:list`) and one species' full data (`db:find`) to judge — critically — whether the
+  species already exists, and if so enriches the stored record + brief instead of duplicating it.
 - **App transactional data:** the same local MariaDB via Prisma, assembled from separate `DB_*`
   env vars (never a connection string). Date/time handling follows the MariaDB rule in the
   constitution.
