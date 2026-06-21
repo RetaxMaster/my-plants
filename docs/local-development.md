@@ -78,13 +78,11 @@ There is no self-service registration. Users are created via an operator script:
 npm --prefix repos/my-plants-api run user:create -- \
   --username <username> \
   --password <password> \
-  --role admin \
-  [--adopt-default]
+  --role admin
 ```
 
-The `--adopt-default` flag links the new user to the pre-existing `"default"` owner row so
-all existing local seed data (places, plants) is immediately visible under this account.
-Without it, a fresh `Owner` row is created (empty garden).
+Each new user gets a fresh, empty `Owner` (garden) of their own. The password must be at
+least 8 characters; `--role` defaults to `user`.
 
 To list all accounts (no password material):
 
