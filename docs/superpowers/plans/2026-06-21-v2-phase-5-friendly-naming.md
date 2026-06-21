@@ -252,14 +252,28 @@ const { data: plants } = await useAsyncData('plants-list', () => api.listPlants(
 </div>
 ```
 
-- [ ] **Step 2: `pages/index.vue`** — replace `plantName` to use the names from `listPlants`:
+- [ ] **Step 2: `pages/index.vue`** — apply the full display rule (title + parenthesized scientific) in the per-plant header. Expose a plant lookup and use it in the template:
 
 ```ts
 import { plantTitle } from '../utils/displayName.js';
+import type { Plant } from '../types/api.js';
+const plantById = (id: string): Plant | undefined => (plants.value ?? []).find((x) => x.id === id);
 const plantName = (id: string): string => {
-  const p = (plants.value ?? []).find((x) => x.id === id);
+  const p = plantById(id);
   return p ? plantTitle(p) : id;
 };
+```
+
+In the template, replace the card header `NuxtLink` so the scientific name shows in italic parentheses, matching the other surfaces:
+
+```vue
+<template #header>
+  <NuxtLink :to="`/plants/${plantId}`" class="font-medium hover:underline">{{ plantName(plantId) }}</NuxtLink>
+  <span
+    v-if="plantById(plantId)?.speciesScientificName && plantById(plantId)?.speciesScientificName !== plantName(plantId)"
+    class="text-xs text-gray-500 italic"
+  > ({{ plantById(plantId)?.speciesScientificName }})</span>
+</template>
 ```
 
 - [ ] **Step 3: `pages/plants/[id].vue`** — the header uses `getPlant` (now carrying names):
