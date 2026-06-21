@@ -27,14 +27,27 @@ Owner  →  City  →  Place  →  Plant
 
 ### Effective microclimate (place → what the plant actually feels)
 
-The place converts "the weather outside" into the conditions the plant experiences:
+The place converts "the weather outside" into the conditions the plant experiences. Alongside the
+effective temperature and humidity, `effectiveConditions` reports for each value whether it is a
+**real signal** (a genuine reading) or a **fallback baseline** — the scheduling modulators consume
+those booleans (see §2).
 
-- **Outdoor place** → uses the city's **real weather** (temp + humidity). If weather is
-  unavailable, neutral baselines are used and the temperature modulator is forced neutral.
-- **Indoor place** → modelled climate. Temperature: the midpoint of `indoorTempMin/MaxC` if both
-  are given; else a comfort baseline of **21 °C**; else (not climate-controlled, weather known) it
-  **tracks outdoor swings, damped** — `21 + 0.4 · (outdoorTemp − 21)`. Humidity comes from the
-  character label: HUMID = 65 %, NORMAL = 50 %, DRY = 35 %.
+- **Outdoor place** → uses the city's **real weather** (temp + humidity), both real signals. If
+  weather is unavailable, neutral baselines are used and neither value is a real signal.
+- **Indoor place** → modelled climate, resolved most-precise → fallback:
+  - **Temperature:** (1) midpoint of `indoorTempMin/MaxC` if both given → real signal; (2) no
+    range but climate-controlled → **21 °C** comfort baseline → **not** a real signal (the room is
+    held comfortable, so there is no temperature signal to act on); (3) no range, not
+    climate-controlled, weather known → **falls back to the real outdoor temperature** → real
+    signal; (4) no range, no weather → 21 °C baseline → not a real signal.
+  - **Humidity:** (1) `humidityCharacter` provided (HUMID = 65 %, NORMAL = 50 %, DRY = 35 %) → real
+    signal; (2) not provided, weather known → **falls back to the real outdoor humidity** → real
+    signal; (3) not provided, no weather → 50 % baseline → not a real signal.
+
+  Indoor temperature range and `humidityCharacter` are **optional**: when absent, the conditions
+  fall back to real outdoor weather (the only real reading available) rather than a comfort
+  baseline. The previous damped-tracking estimate (`21 + 0.4 · (outdoorTemp − 21)`) has been
+  replaced by this honest outdoor fallback.
 
 So the same species in two different places of the same city gets **different plans** — the place
 is the differentiator. Weather is cached for 3 h; a fetch failure falls back to stale cache, then
@@ -42,7 +55,7 @@ to neutral (the scheduler never throws on weather).
 
 ## 2. Scheduling calendar — what to do and when
 
-Five tasks: **WATER, FERTILIZE, REPOT, ROTATE, CLEAN_LEAVES**. For each, the engine computes a
+Six tasks: **WATER, FERTILIZE, REPOT, ROTATE, CLEAN_LEAVES, MIST**. For each, the engine computes a
 single **next-due date**:
 
 ```
@@ -57,9 +70,18 @@ next due = anchor + interval
 by independent modulators, then clamped:
 
 - learned per-plant **adjustment** multiplier (see §4),
-- **temperature modulator** — *outdoor + real weather only*: hotter than the species' ideal max →
-  drink sooner (`<1`), colder than ideal min → slower (`>1`); `clamp(1 + deviation · w · 0.1,
-  0.5, 1.6)` where `w` = temperature sensitivity weight,
+- **temperature modulator** — governed by the **real-signal rule**: it acts only when there is a
+  real temperature reading (outdoor with weather, indoor with an explicit range, or indoor falling
+  back to outdoor); otherwise it stays neutral (`×1`). It now applies **indoors too**, not just
+  outdoors. Hotter than the species' ideal max → drink sooner (`<1`), colder than ideal min →
+  slower (`>1`); `clamp(1 + deviation · w · 0.1, 0.5, 1.6)` where `w` = temperature sensitivity
+  weight,
+- **humidity modulator** — also governed by the real-signal rule (neutral unless there is a real
+  humidity reading). Drier-than-ideal air → water sooner (`<1`); more humid than ideal → water
+  later (`>1`), because transpiration falls as humidity rises. Symmetric to the temperature
+  modulator and clamped to a sane band; weighted by the new per-species `humiditySensitivity`
+  (low/medium/high) via the shared sensitivity-weight table (a calathea is `high`, a succulent
+  `low`),
 - **light modulator** — brighter place than ideal → sooner, dimmer → slower; `clamp(1 +
   (idealLightRank − placeLightRank) · w, 0.7, 1.4)`,
 - **season modulator** — `1.5` when the species `reduceInDormancy` and the current season is the
@@ -76,6 +98,24 @@ by independent modulators, then clamped:
 **REPOT / ROTATE / CLEAN_LEAVES** — pure cadence (`cadenceDays · adjustment`, rounded), no weather
 or season. REPOT cadence = `typicalIntervalMonths · 30`. ROTATE and CLEAN_LEAVES are optional: if
 the species record has `null` for them, the task is skipped entirely.
+
+**MIST** — species-dependent and humidity-graded; **not** season-modulated. The species record
+declares a `misting.benefit` of `beneficial`, `tolerated`, or `avoid` (misting genuinely helps some
+broad-leaved tropicals but harms succulents, fuzzy-leaved plants, and tight crowns, so it is opt-in
+per species). The schedule then grades the species' `baseFrequencyDays` by the place's **effective
+humidity band** (`DRY`/`NORMAL`/`HUMID`, derived from the same fallback-resolved effective humidity
+the rest of the engine sees, so the outdoor fallback applies consistently):
+
+| `benefit`    | DRY                          | NORMAL          | HUMID  |
+|--------------|------------------------------|-----------------|--------|
+| `beneficial` | base frequency **shortened** | base frequency  | none   |
+| `tolerated`  | base frequency               | none            | none   |
+| `avoid`      | none                         | none            | none   |
+
+"none" means **no misting task should exist**: the service skips it and clears any stale due-cache
+row (so moving a plant from a dry room to a humid one removes a now-irrelevant misting reminder).
+Misting does **not** participate in the watering-only punctuality learning (§5); it uses the
+**generic** feedback path only — Done re-anchors, Postpone overrides (§4).
 
 ### "Today" list & recompute triggers
 
