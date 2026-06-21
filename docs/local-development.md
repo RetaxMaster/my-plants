@@ -37,14 +37,73 @@ example once and the app loads it automatically at startup (via dotenv — no ma
 ```bash
 cp repos/my-plants-api/.env.example repos/my-plants-api/.env
 # .env holds: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, PORT, DEFAULT_CITY_TZ, WEB_ORIGIN
+#             JWT_SECRET (≥32 chars)   JWT_EXPIRES_IN (e.g. 30d)
 ```
+
+Fill in the auth variables before starting the API:
+
+| Variable | Notes |
+|---|---|
+| `JWT_SECRET` | A random string of at least 32 characters. Never commit a real value — only `.env.example` carries a placeholder. |
+| `JWT_EXPIRES_IN` | Token TTL. `30d` is the recommended default. |
+
+The web also needs its own `.env`:
+
+```bash
+cp repos/my-plants-web/.env.example repos/my-plants-web/.env
+# .env holds: NUXT_SESSION_PASSWORD (≥32 chars)   NUXT_API_BASE=http://localhost:8000
+```
+
+| Variable | Notes |
+|---|---|
+| `NUXT_SESSION_PASSWORD` | At least 32 characters. Used by `nuxt-auth-utils` to seal the `httpOnly` session cookie. |
+| `NUXT_API_BASE` | The NestJS server URL from Nitro's perspective. Default `http://localhost:8000`. |
 
 Prisma's CLI needs a composed `DATABASE_URL`; `npm run prisma:env` generates it into a
 **separate** `prisma/.env` (so it never overwrites the app's `.env`). `prisma:generate` and
 `prisma:migrate` run that step for you.
 
 Create the database and user once in your local MariaDB, then apply the API's Prisma
-migrations: `npm --prefix repos/my-plants-api run prisma:migrate`.
+migrations (including **migration 0006** which adds the `users` and `revoked_tokens` tables):
+
+```bash
+npm --prefix repos/my-plants-api run prisma:migrate
+```
+
+### Creating a user account
+
+There is no self-service registration. Users are created via an operator script:
+
+```bash
+npm --prefix repos/my-plants-api run user:create -- \
+  --username <username> \
+  --password <password> \
+  --role admin \
+  [--adopt-default]
+```
+
+The `--adopt-default` flag links the new user to the pre-existing `"default"` owner row so
+all existing local seed data (places, plants) is immediately visible under this account.
+Without it, a fresh `Owner` row is created (empty garden).
+
+To list all accounts (no password material):
+
+```bash
+npm --prefix repos/my-plants-api run user:list
+```
+
+### Route protection
+
+All routes require login **except** the blog (`/blog`, `/blog/:id`). Unauthenticated
+navigation is redirected to `/login`. The public API surface is `POST /auth/login`,
+`GET /species`, and `GET /species/:slug/brief` — everything else needs a bearer token.
+
+### Architecture note: the BFF
+
+The browser never holds the JWT. It speaks only to the Nuxt server (Nitro), which seals the
+token in an `httpOnly` session cookie and proxies every API call to NestJS, attaching the
+bearer automatically. See the "Authentication / login wall" section of `docs/architecture.md`
+for the full design.
 
 ## Running
 

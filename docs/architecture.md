@@ -92,13 +92,64 @@ surface the web reads: the **plant list**, **plant detail**, the **species list*
 simulation** response. Today/care payloads are intentionally not enriched (they cross-reference
 list/detail, so adding the fields would only be never-read bloat).
 
-| Method & path | Scope | Purpose |
-|---|---|---|
-| `GET /plants/:id/care` | owner | Per-plant care read model: `{ plantId, tasks: [{ task, nextDueOn, daysUntilDue, status: 'overdue'\|'today'\|'upcoming' }], viability: { level: 'good'\|'caution'\|'poor', reasons: string[] } }`. `status`/`daysUntilDue` are computed server-side; if the due cache is empty it lazily recomputes that plant on demand. |
-| `GET /cities/search?q=` | public | Open-Meteo geocoding proxy → `CitySearchResult[]` (`{ name, country, admin1, latitude, longitude, timezone }`). Degrades to `[]` on any error. |
-| `GET /species/:slug/brief` | public | `{ slug, scientificName, commonNames, briefEs, briefEn }` (`commonNames` read from the species `record` JSON, not a column). `404` on unknown slug. |
-| `POST /moving/simulate` | owner | Body `{ latitude, longitude }` → `PlantViability[]` for the whole garden against that location (each entry carries the plant's common + scientific names for the friendly-naming rule). Writes nothing. |
-| `POST /moving/schedule` | owner | Body `{ name, latitude, longitude, timezone, moveOn }`. Find-or-creates the owner's destination City by coordinates rounded to 4 decimals, then schedules the move. |
+| Method & path | Auth | Scope | Purpose |
+|---|---|---|---|
+| `POST /auth/login` | public | — | `{ username, password }` → `{ token, user: { username, role } }`. |
+| `POST /auth/logout` | bearer | — | Revokes the caller's current token (`jti` added to blocklist). |
+| `GET /auth/me` | bearer | — | Returns `{ username, role }` of the current actor. |
+| `GET /species` | public | — | Lightweight catalog `{ slug, scientificName, commonName }[]` consumed by the blog index and the "add plant" dropdown. |
+| `GET /species/:slug/brief` | public | — | `{ slug, scientificName, commonNames, briefEs, briefEn }`. `404` on unknown slug. |
+| `GET /species/:slug` | bearer | — | Full curated record (care data). Protected to minimise the public surface. |
+| `GET /plants/:id/care` | bearer | owner | Per-plant care read model: `{ plantId, tasks: [{ task, nextDueOn, daysUntilDue, status: 'overdue'\|'today'\|'upcoming' }], viability: { level: 'good'\|'caution'\|'poor', reasons: string[] } }`. Lazily recomputes the due cache if empty. |
+| `GET /cities/search?q=` | bearer | — | Open-Meteo geocoding proxy → `CitySearchResult[]`. Not owner-scoped (public reference data) but still login-gated. Degrades to `[]` on error. |
+| `POST /moving/simulate` | bearer | owner | Body `{ latitude, longitude }` → `PlantViability[]` for the whole garden. Writes nothing. |
+| `POST /moving/schedule` | bearer | owner | Body `{ name, latitude, longitude, timezone, moveOn }`. Find-or-creates the destination City, then schedules the move. |
+
+## Authentication / login wall
+
+All owner-scoped surfaces require a logged-in user. Only the blog (`/blog`, `/blog/:id`) and the minimal public API surface below are reachable without authentication.
+
+### Identity model
+
+A new `users` table holds credentials and role (`USER` / `ADMIN`); it is 1:1 with `Owner` via a unique `owner_id` FK. Resource tables (`City`, `Place`, `Plant`, `ScheduledMove`) are **unchanged** — they remain anchored to `Owner` rows as before. A new `revoked_tokens` table is the logout blocklist (indexed by `expires_at` so stale rows can be purged).
+
+### Tokens
+
+JWTs signed with `JWT_SECRET` (≥ 32 chars), TTL `JWT_EXPIRES_IN` (default `30d`). The signed payload carries `userId`, `ownerId`, `role`, and a unique `jti`. Because the TTL is long, **real logout** is achieved by inserting the `jti` into `revoked_tokens`; the global guard checks the blocklist on every request (one indexed DB read per request — no user lookup; `userId`/`ownerId`/`role` arrive signed in the token). Expired rows are purged opportunistically on login.
+
+### Request → service identity (`nestjs-cls`)
+
+`nestjs-cls` (AsyncLocalStorage) establishes a per-request store before guards run. The `JwtAuthGuard` (registered as `APP_GUARD` — default-deny) writes the validated actor `{ userId, ownerId, role, jti, exp }` into the CLS store and also attaches it to `req.user`. Every service reads the actor from CLS via `OwnerService`:
+
+- `currentOwnerId()` — replaces the old hardcoded `"default"` lookup; throws if called outside a request.
+- `ownerFilter()` — returns `{ ownerId }` for USER, `{}` for ADMIN (the admin bypass for reads/single-row lookups only — see ownership rules below).
+
+### Ownership enforcement + admin bypass
+
+The rule is per operation kind; a blind `where: {}` swap is unsafe for sweep and create operations:
+
+- **Reads (list/single):** `where: { ...ownerFilter(), ... }` — a USER sees only their rows; an ADMIN sees all.
+- **Single-row mutations:** first resolve the target row with `ownerFilter()` (access check), then mutate by `id`.
+- **Per-owner sweep mutations** (e.g., `makePrimary` resets all cities of one owner): derive the sweep scope from the **target resource's `ownerId`**, not from `ownerFilter()`, so an ADMIN acting on someone's data only sweeps that owner's rows.
+- **Creation:** the new resource is stamped with the actor's `ownerId`; create-time FK validation (e.g., a new plant's `placeId`) also checks against the actor's `ownerId` to prevent cross-owner dangling relations.
+- **`CarePlanController.recompute()`:** USER recomputes only their own garden; ADMIN may recompute all.
+
+Users are created only via `npm run user:create` (no HTTP signup).
+
+### System jobs — no actor
+
+System jobs (cron + startup boot hook) run outside any HTTP request and **never call `currentOwnerId()` / `ownerFilter()`**. `MovingService.applyAllDueMoves(now)` iterates `owner.findMany()` and calls `applyDueMovesForOwner(ownerId, now)` for each (per-owner timezone cutoff + `isPrimary` scoped to that owner), then calls `recomputeAll()` once if any moves applied. `CarePlanService.recomputeAll()` already sweeps all plants with no owner filter. The cron and `StartupService` call `applyAllDueMoves` directly, never `applyDueMovesForOwner`.
+
+### Public vs protected surface
+
+| Visibility | Endpoints |
+|---|---|
+| **Public (no auth)** | `POST /auth/login`; `GET /species` (lightweight catalog); `GET /species/:slug/brief` (blog article) |
+| **Protected (bearer required)** | Everything else — `GET /species/:slug` (full record), `plants/*`, `places/*`, `cities/*` (including `GET /cities/search` — not owner-filtered, but login-gated), `care-plan/*`, feedback, `moving/*`, `auth/logout`, `auth/me` |
+
+### Web BFF (browser ↔ Nitro only)
+
+The browser never holds the JWT. `nuxt-auth-utils` seals the token inside an `httpOnly` session cookie under the **`secure`** sub-key (server-only; never serialized to the client). Nitro server routes handle login, logout, and a `me` check; a generic catch-all proxy (`server/api/[...].ts`) forwards every other request to the NestJS API, attaching `Authorization: Bearer <token>` from the session. `useApi` targets the same-origin proxy (`/api${path}`) and uses `useRequestFetch()` during SSR so the sealed session cookie is forwarded on server-side renders.
 
 ## One data store (local MariaDB)
 

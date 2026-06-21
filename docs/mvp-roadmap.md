@@ -44,9 +44,27 @@ migrations, no new env vars):
   (`/blog`, `/blog/:id`) that renders the Spanish brief as plain text (no Markdown parsing this
   iteration).
 
+## Phase 6 — Authentication / login wall (done, 2026-06-21)
+
+A login-gated deployment prerequisite across the full stack:
+
+- **API:** JWT auth (signed, 30-day TTL) + server-side revocation blocklist (`revoked_tokens` table). `users` table 1:1 with `Owner` + `UserRole` (USER/ADMIN). The `owner` seam (`OwnerService.currentOwnerId()`) now resolves the per-request actor from `nestjs-cls` (AsyncLocalStorage) instead of the old hardcoded `"default"` owner. Ownership enforced per operation kind (reads widen for ADMIN; per-owner sweeps derive scope from the target resource; creation stamps the actor's `ownerId`). System jobs (`applyAllDueMoves`, `recomputeAll`) are owner-agnostic and never read the CLS actor. Users created only via `npm run user:create`.
+- **Web (BFF):** The browser talks only to the Nuxt server (Nitro); the JWT is sealed in an `httpOnly` session cookie under `nuxt-auth-utils`' server-only `secure` key (never exposed to browser JS); Nitro proxies all API calls attaching the bearer. Login page, logout action, global route guard, and SSR cookie forwarding via `useRequestFetch()`.
+- **Public surface:** `POST /auth/login`, `GET /species`, `GET /species/:slug/brief`. Everything else is protected, including `GET /cities/search`.
+
+Migration **0006** adds `users` and `revoked_tokens`. New env vars: `JWT_SECRET`, `JWT_EXPIRES_IN` (API); `NUXT_SESSION_PASSWORD`, `NUXT_API_BASE` (web).
+
+## What's next — production deployment
+
+The login wall is the last prerequisite for a public deployment. **Production deployment is the
+next milestone and still needs `docs/deploy.md`** — that document is not defined yet and must
+be authored before any deploy work begins (per the workspace constitution). It must cover:
+HTTPS/domain setup, production secrets, CORS finalization, where the app runs, migration
+gating, and service restart procedure. Do NOT improvise a deploy flow without that doc.
+
 ## Deferred (not in the MVP)
 
 - AI photo diagnosis inside the feedback loop.
-- Multi-user accounts (the seam exists from Phase 3; real accounts come later).
 - `docs/api/` + Postman collection (created once the API is real and functional).
-- Production deploy flow.
+- Multi-user self-service (the seam exists; real multi-tenancy comes later — single real user for now).
+- Production deploy flow (see above — needs `docs/deploy.md` first).
