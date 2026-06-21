@@ -119,6 +119,7 @@ All documentation lives in `docs/`. When a rule above says "see `docs/…`", the
 |---|---|
 | Product vision | `docs/product-vision.md` |
 | Architecture (components/stack/DB/workspace, repo-topology decision) | `docs/architecture.md` |
+| Care engine (place association, scheduling, viability, feedback/adaptation) | `docs/care-engine.md` |
 | Local development (install, env, DB, run, tests) | `docs/local-development.md` |
 | Roadmap | `docs/mvp-roadmap.md` |
 | Multi-repo / submodule mechanics | `docs/multirepo-submodules.md` |
