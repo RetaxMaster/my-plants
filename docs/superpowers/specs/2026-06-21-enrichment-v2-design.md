@@ -307,11 +307,15 @@ through this one helper (no-fork rule).
 
 Today plant-related responses carry only `speciesSlug`. To avoid per-card N+1 fetches on the web,
 the API includes the **primary common name** and the **scientific name** on the responses the web
-already uses: the plant list, plant detail, today's tasks, the plant care endpoint, the species
-list, **and the Moving simulation response** (it is plant-facing and currently returns only
-`nickname` + `speciesSlug`, so omitting it would leave the Moving page on the slug fallback and
-violate B.1). These are derived from the species record via `primaryCommonName` +
-`record.scientificName`.
+reads for naming: the **plant list**, **plant detail**, the **species list**, **and the Moving
+simulation response** (it is plant-facing and currently returns only `nickname` + `speciesSlug`, so
+omitting it would leave the Moving page on the slug fallback and violate B.1). These are derived from
+the species record via `primaryCommonName` + `record.scientificName`.
+
+The **Today view** and the **plant care endpoint** payloads are intentionally NOT enriched: the
+Today page (`pages/index.vue`) cross-references the plant list for names, and the plant page reads
+the plant detail — so list/detail/species/moving already cover every naming surface, and adding the
+fields to today/care would only create never-read payload bloat (YAGNI).
 
 ### B.4 Researcher guidance
 

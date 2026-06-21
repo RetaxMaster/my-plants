@@ -6,7 +6,7 @@
 
 **Architecture:** The API enriches the responses the web reads for naming with two flat fields — `speciesScientificName` and `speciesCommonName` — derived from the species record via the `primaryCommonName` helper (single source). The web renders one display rule via a small helper.
 
-**Scope note (documented decision):** the spec lists "today's tasks" and "the plant care endpoint" among the responses to enrich. The web's Today view (`pages/index.vue`) and plant page already cross-reference `listPlants`/`getPlant` for names, so enriching **plant list, plant detail, species list, and moving simulation** covers every naming surface with no dead fields (YAGNI). We do not add never-read name fields to the today/care payloads.
+**Scope note:** per the spec (B.3), names go on the **plant list, plant detail, species list, and Moving simulation** — which covers every naming surface, because the Today view cross-references the plant list and the plant page reads the plant detail. The today/care payloads are intentionally not enriched (no never-read fields). Render the scientific name in **parentheses** next to the primary name, per the spec's `Common name *(Scientific name)*` format.
 
 **Tech Stack:** TypeScript, NestJS, Prisma, Nuxt 3 / Vue 3, Vitest.
 
@@ -235,7 +235,7 @@ git commit -m "feat: web display-name helper + name fields on plant/species type
 - Modify: `repos/my-plants-web/pages/blog/index.vue`
 - Modify: `repos/my-plants-web/pages/blog/[id].vue`
 
-For each, import the helper and render **primary name** + a small italic scientific suffix. Use this pattern (a `<span>` with `italic text-sm text-gray-500` for the scientific part); show the suffix only when it differs from the title.
+For each, import the helper and render the **primary name** followed by the scientific name in **small italic parentheses** (spec format `Common name *(Scientific name)*`). Render the parenthesized suffix only when the scientific name is known and differs from the primary title (avoids `Dracaena (Dracaena)` when the common name is missing and the title already is the scientific name).
 
 - [ ] **Step 1: `pages/plants/index.vue`** — replace the card link/subtitle:
 
@@ -246,8 +246,10 @@ const api = useApi();
 const { data: plants } = await useAsyncData('plants-list', () => api.listPlants());
 </script>
 <!-- in template, per card: -->
-<NuxtLink :to="`/plants/${p.id}`" class="font-medium hover:underline">{{ plantTitle(p) }}</NuxtLink>
-<p class="text-xs text-gray-500 italic">{{ p.speciesScientificName }}</p>
+<div>
+  <NuxtLink :to="`/plants/${p.id}`" class="font-medium hover:underline">{{ plantTitle(p) }}</NuxtLink>
+  <span v-if="p.speciesScientificName && p.speciesScientificName !== plantTitle(p)" class="text-xs text-gray-500 italic"> ({{ p.speciesScientificName }})</span>
+</div>
 ```
 
 - [ ] **Step 2: `pages/index.vue`** — replace `plantName` to use the names from `listPlants`:
@@ -268,8 +270,10 @@ import { plantTitle } from '../../utils/displayName.js';
 // ...existing...
 </script>
 <!-- header -->
-<h2 class="text-xl font-bold mt-2">{{ plantTitle(plant) }}</h2>
-<p class="text-gray-500 italic">{{ plant.speciesScientificName }}</p>
+<h2 class="text-xl font-bold mt-2">
+  {{ plantTitle(plant) }}
+  <span v-if="plant.speciesScientificName && plant.speciesScientificName !== plantTitle(plant)" class="text-base font-normal text-gray-500 italic">({{ plant.speciesScientificName }})</span>
+</h2>
 ```
 
 (Remove the old `plant.speciesSlug` subtitle line.)
@@ -292,22 +296,26 @@ import { speciesPrimaryName } from '../utils/displayName.js';
 <!-- per result card -->
 <div>
   <span class="font-medium">{{ r.nickname || speciesPrimaryName(r) }}</span>
-  <span class="text-xs text-gray-500 italic"> {{ r.speciesScientificName }}</span>
+  <span v-if="r.speciesScientificName && r.speciesScientificName !== (r.nickname || speciesPrimaryName(r))" class="text-xs text-gray-500 italic"> ({{ r.speciesScientificName }})</span>
 </div>
 ```
 
 - [ ] **Step 6: `pages/blog/index.vue`** — list by common name, scientific italic underneath:
 
 ```vue
-<NuxtLink :to="`/blog/${s.slug}`" class="font-medium hover:underline">{{ s.commonName }}</NuxtLink>
-<p class="text-xs text-gray-500 italic">{{ s.scientificName }}</p>
+<div>
+  <NuxtLink :to="`/blog/${s.slug}`" class="font-medium hover:underline">{{ s.commonName || s.scientificName }}</NuxtLink>
+  <span v-if="s.scientificName && s.scientificName !== (s.commonName || s.scientificName)" class="text-xs text-gray-500 italic"> ({{ s.scientificName }})</span>
+</div>
 ```
 
 - [ ] **Step 7: `pages/blog/[id].vue`** — common name as the title, scientific italic underneath (the brief already exposes `commonNames` + `scientificName`):
 
 ```vue
-<h2 class="text-xl font-bold mt-2">{{ brief.commonNames[0] ?? brief.scientificName }}</h2>
-<p class="text-gray-500 italic">{{ brief.scientificName }}</p>
+<h2 class="text-xl font-bold mt-2">
+  {{ brief.commonNames[0] ?? brief.scientificName }}
+  <span v-if="brief.commonNames.length" class="text-base font-normal text-gray-500 italic">({{ brief.scientificName }})</span>
+</h2>
 ```
 
 - [ ] **Step 8: Build + typecheck** (the gate for web):

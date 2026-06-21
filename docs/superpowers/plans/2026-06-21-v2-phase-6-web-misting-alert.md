@@ -97,9 +97,11 @@ export interface Place {
 }
 ```
 
-- [ ] **Step 2: Make humidity optional in the form** — in `pages/places/index.vue`, add an explicit "Not specified" option and default the form's `humidityCharacter` to `undefined` (not `'NORMAL'`), so an indoor place can be created without it. Update the humidity options and the form init:
+- [ ] **Step 2: Make humidity optional in the form** — in `pages/places/index.vue`, add an explicit "Not specified" option and a **local form type** so the `''` sentinel is representable (the `CreatePlace` DTO type cannot hold `''`). Define `PlaceForm`, switch the `reactive` to it, and default `humidityCharacter` to `''`:
 
 ```ts
+type PlaceForm = Omit<CreatePlace, 'humidityCharacter'> & { humidityCharacter: HumidityCharacter | '' };
+
 const humidityOptions: { label: string; value: HumidityCharacter | '' }[] = [
   { label: 'Not specified', value: '' },
   { label: 'Dry', value: 'DRY' },
@@ -107,13 +109,13 @@ const humidityOptions: { label: string; value: HumidityCharacter | '' }[] = [
   { label: 'Humid', value: 'HUMID' },
 ];
 
-const form = reactive<CreatePlace>({
+const form = reactive<PlaceForm>({
   cityId: '', name: '', indoor: true, lightType: 'BRIGHT_INDIRECT',
-  climateControlled: false, humidityCharacter: undefined, indoorTempMinC: null, indoorTempMaxC: null,
+  climateControlled: false, humidityCharacter: '', indoorTempMinC: null, indoorTempMaxC: null,
 });
 ```
 
-Bridge the empty-string select to `undefined` on the payload (so the API stores null). In `submit`, when indoor, drop `humidityCharacter` if it is falsy:
+Map `PlaceForm` → `CreatePlace` in `submit` (the `''`/falsy guard drops the field, so the API stores null):
 
 ```ts
 async function submit() {
@@ -126,7 +128,7 @@ async function submit() {
       }
     : { cityId: form.cityId, name: form.name, indoor: false, lightType: form.lightType };
   await api.createPlace(payload);
-  Object.assign(form, { name: '', climateControlled: false, humidityCharacter: undefined, indoorTempMinC: null, indoorTempMaxC: null });
+  Object.assign(form, { name: '', climateControlled: false, humidityCharacter: '', indoorTempMinC: null, indoorTempMaxC: null });
   await refresh();
 }
 ```
