@@ -1,7 +1,9 @@
 # MyPlants — Implementation Status & Handoff
 
-**Date:** 2026-06-18
-**State:** All four phases implemented, tested green, and **left shut down** (nothing running).
+**Date:** 2026-06-21
+**State:** All four phases implemented and tested green; the **MVP-enrichment pass (phases A–D)** is
+now implemented on top (branch `feature/mvp-enrichment` in the submodules). No DB schema changes, no
+new migrations, no new env vars. Left **shut down** (nothing running).
 
 ## What exists
 
@@ -18,6 +20,36 @@ Four local subrepos under `repos/` (each a standalone git repo with full commit 
 *Dracaena fragrans* (corn plant), both `confidence: high`, researched by Claudex via the
 knowledge-engine runbook and inserted with `npm run db:insert`. **All instance data (cities/
 places/plants) was wiped after testing**, so you start from a clean slate with the species ready.
+
+## MVP-enrichment pass (phases A–D, 2026-06-21)
+
+A cross-repo polish pass over the working MVP. **No DB schema changes, no new migrations, no new env
+vars** — so the run/setup steps above are unchanged. What it added:
+
+- **A — care loop.** The care engine now **learns from early waterings**: late/postponed waterings
+  do not change the interval (that's what Postpone is for), early waterings shorten it with reduced
+  gain (`EARLY_GAIN = 0.15`); the loop is convergent and confidence-gated (nudges only when at least
+  `minSamples`, default 2, recent eligible cycles are early **and** the newest is early, using the
+  newest cycle's ratio — not a re-applied average — so it settles at the owner's true rhythm).
+  Adherence per cycle is persisted in the existing `CareEvent.payload` JSON (no migration), exactly
+  one nudge per eligible cycle. Plus a **startup recompute hook** (apply due moves on boot, then
+  recompute the garden only if none applied; the 05:00 cron stays).
+- **B — environment.** `GET /cities/search?q=` (Open-Meteo geocoding proxy, free/no key, degrades to
+  `[]` on error) + a reusable web `CitySearch` component (cities and moving use the Open-Meteo bank,
+  no manual coordinates). The places form exposes the indoor-only optional environmental fields.
+- **C — viability.** Viability rules extracted into one shared pure `buildViability` engine, used by
+  **both** moving and the new `GET /plants/:id/care` read model; the plant page shows a viability
+  badge. `WeatherService` generalized to `forLocation(key, lat, lng)` with `forCity` as a thin
+  wrapper. `POST /moving/simulate` now takes `{ latitude, longitude }`; `POST /moving/schedule` takes
+  `{ name, latitude, longitude, timezone, moveOn }` and find-or-creates the destination City by
+  coordinates rounded to 4 decimals.
+- **D — blog.** `GET /species/:slug/brief` → `{ slug, scientificName, commonNames, briefEs, briefEn }`
+  (`commonNames` read from the species `record` JSON, `404` on unknown slug) + a web Blog section at
+  `/blog` and `/blog/:id` rendering the Spanish brief as plain text (no Markdown parsing this
+  iteration).
+
+The full API surface and engine behavior are documented in `docs/architecture.md` and
+`docs/care-engine.md`.
 
 ## Verified end-to-end (qa-engineer, real browser)
 

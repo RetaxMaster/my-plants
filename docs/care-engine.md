@@ -86,8 +86,12 @@ today or overdue**, oldest first.
 
 The plan is recomputed:
 - **daily at 05:00** (cron, whole garden),
-- **after every feedback event** (that plant), and
-- **after a scheduled move is applied** (whole garden).
+- **after every feedback event** (that plant),
+- **after a scheduled move is applied** (whole garden),
+- **on app boot** — the startup hook applies any due moves and, only if none were applied,
+  recomputes the whole garden once (see `docs/architecture.md`), and
+- **lazily, on demand** — the per-plant care read model (`GET /plants/:id/care`) recomputes that
+  plant if its due cache is empty, so the endpoint never returns a stale/empty schedule.
 
 ## 3. Viability semaphore — does the place suit the species?
 
@@ -99,8 +103,10 @@ Separate from scheduling. It compares the place's effective conditions against t
 - place light rank below species minimum: gap ≥ 2 → **poor**, gap of 1 → **caution**,
 - effective humidity below species minimum → **caution**.
 
-Today this is surfaced in the **moving what-if simulation** (viability of every plant against a
-target city's weather). It writes nothing.
+The computation is one shared pure function, **`buildViability`**, that is the single source of
+truth — used both by the **moving what-if simulation** (viability of every plant against a target
+location's weather) and by the **per-plant care read model** (`GET /plants/:id/care`, which shows a
+viability badge on the plant page). It writes nothing. There is no second copy of the rules to drift.
 
 ## 4. Feedback loop — Done / Postpone / Symptom
 
@@ -142,19 +148,42 @@ it (today, or backdated to yesterday). Because that date becomes the anchor:
 
 So the schedule always re-syncs from the **real action**, not from the planned date.
 
-## 5. Known limitation — no punctuality learning yet
+## 5. Punctuality learning — convergent early-watering adaptation
 
-The adaptation function already accepts an `earlyLateRatio` input (observed interval ÷ scheduled
-interval) whose intent is: if you *consistently* act earlier than scheduled, permanently **shorten**
-the base interval; later → lengthen it (`cadenceNudge = (ratio − 1) · 0.3`). **Today this input is
-hard-wired to `1`, so it contributes nothing.** The practical consequence: marking a watering early
-or late **re-anchors** the next due (a one-time shift) but does **not** yet make the engine learn
-"this owner always waters 2 days early" and bake that into the base rhythm. Active learning
-currently comes only from **postpones** and **symptoms**. Feeding a real `earlyLateRatio` from the
-DONE history is a natural future improvement.
+Beyond the one-time re-anchoring above, the engine now **learns the owner's true watering rhythm**
+from the timing of their DONE events. The signal is the `earlyLateRatio` (observed interval ÷
+scheduled interval) per completed cycle, and the policy is deliberately **asymmetric**:
+
+- **Late / postponed waterings do NOT change the interval.** Acting later than scheduled is assumed
+  to be forgetfulness, not a sign the plant needs water less often — and there is already a dedicated
+  tool for "this plant genuinely needs it less often": Postpone (§4). So lateness alone never
+  stretches the base rhythm.
+- **Early waterings shorten the interval, with reduced gain.** If you consistently water ahead of
+  schedule, the plant probably drinks faster than the species default, so the interval is nudged
+  shorter — but cautiously, using a small `EARLY_GAIN = 0.15`.
+
+The loop is **convergent and confidence-gated**, so it settles at the owner's real rhythm instead
+of ratcheting down to the floor:
+
+- It only nudges when **at least `minSamples` (default 2)** of the recent eligible cycles are early
+  **and** the **newest** cycle is early — a single early watering won't move anything.
+- When it does nudge, it uses the **newest cycle's** observed/scheduled ratio (NOT a re-applied
+  running average), so once the schedule has converged to the owner's pace, new on-time cycles stop
+  producing change instead of compounding.
+- **Exactly one nudge per eligible cycle**, and the resulting multiplier is still bounded to
+  **[0.5, 2.0]** like every other adjustment.
+
+Per-cycle adherence is persisted in the existing `CareEvent.payload` JSON, so **no schema change /
+migration** was needed to add this learning. Together with **postpones** and **symptoms** (§4), this
+is now the third active learning input.
 
 ## 6. Moving (brief)
 
-Scheduling a move stores a `ScheduledMove`. When its date arrives, the target city becomes
-primary, **outdoor places repoint** to it (indoor places don't — a room is still a room), and the
-whole garden recomputes. The apply step is idempotent via an `applied` flag.
+Scheduling a move takes the destination as raw coordinates (`{ name, latitude, longitude,
+timezone, moveOn }`), **find-or-creates** the owner's destination City by those coordinates rounded
+to 4 decimals, and stores a `ScheduledMove`. The what-if simulation takes just `{ latitude,
+longitude }` and prices the whole garden against that location without saving anything (the
+generalized `weather.forLocation` makes this possible for an unsaved spot). When the move's date
+arrives, the target city becomes primary, **outdoor places repoint** to it (indoor places don't — a
+room is still a room), and the whole garden recomputes. The apply step is idempotent via an
+`applied` flag, and the **startup hook** applies any move whose date has already passed.
