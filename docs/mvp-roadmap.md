@@ -54,6 +54,16 @@ A login-gated deployment prerequisite across the full stack:
 
 Migration **0006** adds `users` and `revoked_tokens`. New env vars: `JWT_SECRET`, `JWT_EXPIRES_IN` (API); `NUXT_SESSION_PASSWORD`, `NUXT_API_BASE` (web).
 
+## Phase 7 — Editing + per-plant cutoff + honest Moving (done, 2026-06-21)
+
+Editing surfaces and honest location semantics (no DB migration — all fields already existed):
+
+- **Plant editing:** `PATCH /plants/:id` (nickname/place) with a read-only `GET /plants/:id/viability-preview` so the web shows the projected viability semaphore before confirming a move. A place change recomputes the plant.
+- **Place editing:** `PATCH /places/:id` (name/climateControlled); a climate-controlled change recomputes every plant in the place.
+- **Per-plant day cutoff:** the "today" boundary now derives from each plant's place-city timezone instead of the owner's primary city. `isPrimary` stays, used only by Moving.
+- **Honest Moving:** `simulate`/`apply` scope to the plants/places at the current (primary) city; `apply` resolves the old primary per-move (chain-safe) and repoints only its outdoor places.
+- **Web:** edit modals on the plant detail page (with preview) and the places list.
+
 ## What's next — production deployment
 
 The login wall is the last prerequisite for a public deployment. **Production deployment is the

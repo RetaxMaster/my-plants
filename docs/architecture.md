@@ -81,7 +81,9 @@ started instance immediately consistent.
 ## HTTP API surface
 
 Owner-scoped endpoints resolve the single v1 owner server-side; public reference endpoints are not
-owner-scoped. Dates are `YYYY-MM-DD` strings computed in the owner's primary-city timezone.
+owner-scoped. Dates are `YYYY-MM-DD` strings, and the "today" day boundary is computed **per plant**
+from the timezone of that plant's place-city (not a single primary city). The `isPrimary` flag still
+exists, used only by Moving as the garden's "current location".
 
 **Friendly naming:** the colloquial common name is the **primary human-facing name** across the app,
 shown with the scientific name in small italic parentheses (e.g. **Lengua de suegra**
@@ -101,8 +103,11 @@ list/detail, so adding the fields would only be never-read bloat).
 | `GET /species/:slug/brief` | public | — | `{ slug, scientificName, commonNames, briefEs, briefEn }`. `404` on unknown slug. |
 | `GET /species/:slug` | bearer | — | Full curated record (care data). Protected to minimise the public surface. |
 | `GET /plants/:id/care` | bearer | owner | Per-plant care read model: `{ plantId, tasks: [{ task, nextDueOn, daysUntilDue, status: 'overdue'\|'today'\|'upcoming' }], viability: { level: 'good'\|'caution'\|'poor', reasons: string[] } }`. Lazily recomputes the due cache if empty. |
+| `PATCH /plants/:id` | bearer | owner | Body `{ nickname?, placeId? }`. Edits the plant's nickname (empty → cleared) and/or place. A place change recomputes the plant; the target place must belong to the plant's owner. |
+| `GET /plants/:id/viability-preview?placeId=` | bearer | owner | Read-only projected viability of the plant as if it lived in the given place. Used by the web edit modal before confirming a move. Writes nothing. |
+| `PATCH /places/:id` | bearer | owner | Body `{ name?, climateControlled? }`. A `climateControlled` change recomputes every plant in the place; a name-only change does not. |
 | `GET /cities/search?q=` | bearer | — | Open-Meteo geocoding proxy → `CitySearchResult[]`. Not owner-scoped (public reference data) but still login-gated. Degrades to `[]` on error. |
-| `POST /moving/simulate` | bearer | owner | Body `{ latitude, longitude }` → `PlantViability[]` for the whole garden. Writes nothing. |
+| `POST /moving/simulate` | bearer | owner | Body `{ latitude, longitude }` → `PlantViability[]` for the plants at the current (primary) city only — plants in other cities are not "with you". Writes nothing. |
 | `POST /moving/schedule` | bearer | owner | Body `{ name, latitude, longitude, timezone, moveOn }`. Find-or-creates the destination City, then schedules the move. |
 
 ## Authentication / login wall
@@ -138,7 +143,7 @@ Users are created only via `npm run user:create` (no HTTP signup).
 
 ### System jobs — no actor
 
-System jobs (cron + startup boot hook) run outside any HTTP request and **never call `currentOwnerId()` / `ownerFilter()`**. `MovingService.applyAllDueMoves(now)` iterates `owner.findMany()` and calls `applyDueMovesForOwner(ownerId, now)` for each (per-owner timezone cutoff + `isPrimary` scoped to that owner), then calls `recomputeAll()` once if any moves applied. `CarePlanService.recomputeAll()` already sweeps all plants with no owner filter. The cron and `StartupService` call `applyAllDueMoves` directly, never `applyDueMovesForOwner`.
+System jobs (cron + startup boot hook) run outside any HTTP request and **never call `currentOwnerId()` / `ownerFilter()`**. `MovingService.applyAllDueMoves(now)` iterates `owner.findMany()` and calls `applyDueMovesForOwner(ownerId, now)` for each (per-owner timezone cutoff + `isPrimary` scoped to that owner; each move resolves the current primary **inside its own transaction** and repoints only that old-primary city's outdoor places, so a chain of due moves stays correct), then calls `recomputeAll()` once if any moves applied. `CarePlanService.recomputeAll()` already sweeps all plants with no owner filter. The cron and `StartupService` call `applyAllDueMoves` directly, never `applyDueMovesForOwner`.
 
 ### Public vs protected surface
 
