@@ -19,3 +19,6 @@ database-backup/
 
 # Playwright CLI scratch (local QA runs)
 .playwright-cli/
+
+# Claude Design import artifact (the raw prototype zip; tokens/components live in the app)
+new-frontend.zip
