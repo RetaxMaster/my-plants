@@ -113,6 +113,8 @@ for the full design.
 
 MariaDB must be running before `./run.sh`.
 
+> **First web build needs network once.** The web app self-hosts its fonts via `@nuxt/fonts`: the first `nuxt build`/`nuxt dev` downloads the webfont `.woff2` files (Hanken Grotesk, Newsreader, JetBrains Mono) and caches them under `.nuxt/cache/fonts/`. After that first fetch it works offline. Icons (`@nuxt/icon` + `@iconify-json/heroicons`) are already local — no runtime CDN.
+
 ## Testing
 
 ```bash

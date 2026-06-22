@@ -41,7 +41,7 @@ rule), never copy-pasted — see `docs/multirepo-submodules.md`.
 | Shared schema | Zod (validates at runtime + derives static types) |
 | Knowledge engine | `tsx` scripts + Vitest; a two-step authoring flow driven by its own `CLAUDE.md` — `plant-researcher` writes ONE raw, fact-complete **English** brief, then an `editorial-writer` subagent rewrites it into polished English + Spanish in one consistent house voice |
 | API | NestJS, Prisma ORM over **local MariaDB** (no Docker) |
-| Web | Nuxt 3 + Vue 3 + Nuxt UI |
+| Web | Nuxt 3 + Vue 3 + an in-house design system imported from Claude Design (CSS tokens + Vue components under `components/ui/`; light/dark via `@nuxtjs/color-mode`; self-hosted fonts via `@nuxt/fonts`; icons via `@nuxt/icon` + local heroicons). No Nuxt UI / Tailwind. See `docs/frontend-design-system.md`. |
 | Weather | Open-Meteo (free, no API key) |
 
 ## Care app modules (NestJS)

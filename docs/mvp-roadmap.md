@@ -63,6 +63,7 @@ Editing surfaces and honest location semantics (no DB migration — all fields a
 - **Per-plant day cutoff:** the "today" boundary now derives from each plant's place-city timezone instead of the owner's primary city. `isPrimary` stays, used only by Moving.
 - **Honest Moving:** `simulate`/`apply` scope to the plants/places at the current (primary) city; `apply` resolves the old primary per-move (chain-safe) and repoints only its outdoor places.
 - **Web:** edit modals on the plant detail page (with preview) and the places list.
+- **Frontend redesign:** the web UI was rebuilt on an in-house design system imported from Claude Design (CSS tokens + reusable Vue components), replacing Nuxt UI/Tailwind. Adds light/dark mode, a responsive auth-aware nav (desktop top row, mobile bottom bar + More), and self-hosted fonts/icons (offline). i18n deferred (strings stay English in place).
 
 ## What's next — production deployment
 

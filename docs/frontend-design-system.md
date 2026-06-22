@@ -26,6 +26,36 @@ The design system is authored externally with **Claude Design** and delivered as
 
 Maintain an explicit map from each zip preview (`comp-*.html`) to its Vue wrapper, so future syncs never recreate an existing component. Update it whenever a wrapper is added. Page-specific layout stays in the page/component; everything else must use design-system tokens and reach for an existing component before writing markup by hand.
 
-| Design piece (zip preview) | Vue component (`components/ui/`) |
+Filled from the first import (`new-frontend.zip`, 2026-06-22). DS-bundle components and `app/shared.jsx` helpers map to SFCs under `components/ui/`; app-chrome and real-feature pieces map to feature components.
+
+| Design piece (prototype source) | Vue component |
 |---|---|
-| _(to be filled when the first Claude Design zip is imported)_ | — |
+| `core/Button` | `ui/Button.vue` |
+| `core/Badge` | `ui/Badge.vue` |
+| `core/ViabilityBadge` | `ui/ViabilityBadge.vue` |
+| `core/Card` | `ui/Card.vue` |
+| `core/Icon` | `ui/AppIcon.vue` (renders `@nuxt/icon` with `heroicons:*`) |
+| `forms/Input` | `ui/Input.vue` |
+| `forms/Select` | `ui/SelectField.vue` (renamed to dodge auto-import clash) |
+| `forms/Switch` | `ui/Switch.vue` |
+| `forms/FormGroup` | `ui/FormGroup.vue` |
+| `feedback/Alert` | `ui/Alert.vue` |
+| `navigation/NavTabs` | `ui/NavTabs.vue` |
+| `plants/TaskRow` | `ui/TaskRow.vue` (+ `composables/useTaskMeta.ts` for labels/icons) |
+| `plants/PlantAvatar` | `ui/PlantAvatar.vue` |
+| `content/Prose` | `ui/Prose.vue` |
+| (modal pattern — no bundle component) | `ui/Modal.vue` (accessible: focus trap, Teleport, Escape/backdrop, scroll-lock) |
+| `shared.jsx` ScreenHeader | `ui/ScreenHeader.vue` |
+| `shared.jsx` SectionTitle | `ui/SectionTitle.vue` |
+| `shared.jsx` EmptyState | `ui/EmptyState.vue` |
+| `shared.jsx` PlantName | `ui/PlantName.vue` (always shows the italic scientific name) |
+| `shared.jsx` IconTile | `ui/IconTile.vue` |
+| `shared.jsx` CardGrid | `ui/CardGrid.vue` |
+| `shared.jsx` PlantStatusBadge | `ui/PlantStatusBadge.vue` (renders from `dueCount`) |
+| `shared.jsx` CitySearch (mock) | `components/CitySearch.vue` (real `searchCities` geocoder) |
+| `app.jsx` wordmark | `ui/BrandMark.vue` (the single canonical 🌱 MyPlants lockup) |
+| `app.jsx` theme toggle | `ui/ThemeToggle.vue` (flips `@nuxtjs/color-mode`) |
+| `app.jsx` AccountMenu | `components/AccountMenu.vue` (primary city via `useApi().listCities()`) |
+| `app.jsx` shell + nav | `layouts/default.vue` (responsive, CSS-media-query nav) + `pages/more.vue` |
+| `app.jsx` TweaksPanel | _not ported_ — only the light/dark toggle was kept (density=cozy, corners=soft, sci-names always on are baked in) |
+| (real feature, absent in prototype) | `components/PlantEditModal.vue`, `components/PlaceEditModal.vue` (on `ui/Modal`) |
