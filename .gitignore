@@ -16,3 +16,6 @@ dist/
 
 # Local DB backups (sensitive — never commit)
 database-backup/
+
+# Playwright CLI scratch (local QA runs)
+.playwright-cli/
