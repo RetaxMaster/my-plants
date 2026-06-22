@@ -9,7 +9,7 @@ The workspace is a **Git multirepo orchestrator with submodules under `repos/`**
 - `repos/my-plants-species-schema` — the shared data contract (Zod schema + inferred types + validators); the single source of truth for the curated species-record shape, consumed by the other repos.
 - `repos/my-plants-knowledge-engine` — a Claude-driven research workspace (its own `CLAUDE.md`) that turns a scientific name into a validated curated species record + a Markdown brief.
 - `repos/my-plants-api` — NestJS backend: the deterministic care engine (scheduling, viability semaphore, feedback adaptation, moving) over local MariaDB via Prisma.
-- `repos/my-plants-web` — Nuxt 3 + Vue 3 frontend (Nuxt UI).
+- `repos/my-plants-web` — Nuxt 3 + Vue 3 frontend, styled from an in-house design system imported from Claude Design (global CSS tokens + Vue wrappers under `components/ui/`); Tailwind / Nuxt UI is being retired (see the Frontend / UI section).
 
 **Runtime constraints (v1):** local only — no Docker, no cloud. MariaDB runs directly on the host. The care app is **100% deterministic** (no runtime AI, no AI keys in production); all AI lives in the knowledge engine. Single user now, structured so multi-user is an additive change later. Full technical design: `docs/architecture.md` and `docs/superpowers/specs/`.
 
@@ -83,10 +83,22 @@ Full submodule mechanics: `docs/multirepo-submodules.md`.
 
 **No new forks:** never copy a file between repos (or within one) to share logic. When two surfaces must share behavior, extract ONE implementation with the per-context differences injected, so drift becomes structurally impossible. The species-record shape is the canonical example: it lives once in `my-plants-species-schema` and is imported, never copied. Parallel per-context copies of one surface (adapters, pollers, handlers) are a high-yield bug class: any contract/behavior change in one MUST be propagated to every sibling in the same change.
 
+## Frontend / UI (`repos/my-plants-web`)
+
+Nuxt 3 + Vue 3. The UI is built from an **in-house design system imported from Claude Design** — global CSS tokens + component-class libraries + Vue wrappers under `components/ui/`; **Tailwind / Nuxt UI is being retired** in favor of it. The import/sync procedure and the component↔source map live in `docs/frontend-design-system.md`.
+
+- **Reuse before you rewrite.** Before writing markup by hand, reach for an existing wrapper in `components/ui/`; every design change creates or extends a **reusable Vue component**, never a one-off. If a component for the pattern exists, use it — never rebuild it (the fork-prevention rule applied to UI: one implementation, reused).
+- **Design tokens are the single source of visual truth.** Colors, type, spacing, radii, and shadows live in the design-system token CSS — never inline styles or magic values duplicating a token. For a genuinely new pattern, **extend the design system** (add the token/class); don't patch locally. Page-specific layout may live in the page/component; everything else goes through tokens + components.
+- **Repeated brand/identity elements live in one component.** The brand lockup — and anything repeated across screens — is a single canonical component under `components/ui/`, never hand-rolled per page.
+- **API access is centralized.** All backend calls go through `composables/useApi.ts` (over the BFF `/api` proxy); their request/response types live in `types/api.ts`. Never scatter raw `$fetch`/`fetch` across components.
+- **i18n is planned, not yet enabled.** Until it lands, keep user-facing strings in English in place — don't block the redesign on it. When i18n is added, every user-facing string moves to the i18n layer with identical key trees per locale (decision recorded here).
+- **Performance review on every new or imported page/component (mandatory).** Claude Design markup assumes free GPU compositing; with hardware acceleration off it composites on the CPU. **Invariant:** never animate a blurred (`filter` / `backdrop-filter: blur()`) or `mix-blend-mode`'d full-viewport element, and never animate layout/paint properties in an infinite loop — promote one node and animate `transform` / `opacity` only. Verify in a **real browser** with the `/web-perf-seo-audit` skill, not by static CSS reasoning.
+- **Importing the Claude Design `*.zip`: sync, don't rebuild.** Diff the incoming CSS into the token/component CSS, create Vue wrappers ONLY for NEW pieces (never recreate existing ones), refactor hand-written markup onto the imported components, and verify with `npm run typecheck && npm run build`. Full step-by-step + the component↔source map: `docs/frontend-design-system.md`.
+
 ## Testing
 
 - **`my-plants-species-schema` / `my-plants-knowledge-engine` / `my-plants-api`:** `npm test`.
-- **`my-plants-web`:** `npm run build` (build + typecheck).
+- **`my-plants-web`:** `npm run typecheck && npm run build` (`nuxt build` does NOT typecheck — `nuxt typecheck` is the separate gate).
 - **Whole workspace:** `./scripts/test-all.sh`.
 - **Tests must be env-hermetic:** a test that asserts an env-default code path MUST delete/restore the ambient var around the assertion, or it passes locally and breaks elsewhere.
 - **MariaDB date/time rule (critical for the date-heavy scheduling engine):** never compare date/time columns against `toISOString()`/ISO strings — MariaDB may parse them in the session timezone and shift due-date thresholds by the UTC offset. Bind native datetime objects (let the ORM stringify them in the connection timezone) or use the DB's own `NOW()`. Fix the connection timezone explicitly.
@@ -125,6 +137,7 @@ All documentation lives in `docs/`. When a rule above says "see `docs/…`", the
 | Multi-repo / submodule mechanics | `docs/multirepo-submodules.md` |
 | Deploy | *(not defined yet — local-only v1)* |
 | API collection | `docs/api/` *(pending — create once the API exists)* |
+| Frontend design system & component library | `docs/frontend-design-system.md` |
 | Design specs & plans | `docs/superpowers/specs/`, `docs/superpowers/plans/` |
 
 **After every completed feature, update docs:** the API collection and `docs/architecture.md` when the API surface/contracts change; the roadmap when scope advances; `docs/local-development.md` when setup/run/test steps change.
