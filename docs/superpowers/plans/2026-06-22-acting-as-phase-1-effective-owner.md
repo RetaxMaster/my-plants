@@ -360,13 +360,13 @@ Also update the `it('creation stamps the acting actor ownerId and scopes the isP
 
 ```ts
   it('an ADMIN acting-as another owner can edit that owner plant, validating the target place against the PLANT owner', async () => {
-    const { svc, run } = setup();
+    const { svc, run, recomputed, seed } = setup();
     await run({ ...actor('owner-1', 'ADMIN'), actingAsOwnerId: 'owner-2' }, async () => {
       // pl-other belongs to owner-2; place-y also belongs to owner-2 → allowed.
       // (keep the body of the original test below this line unchanged)
 ```
 
-Keep the rest of that test's body (the `svc.update('pl-other', { placeId: 'place-y' })` call and its assertions) exactly as it was — only the `run(...)` actor and the title change.
+Keep the full `setup()` destructure (`const { svc, run, recomputed, seed } = setup();`) and the rest of that test's body (the `svc.update('pl-other', { placeId: 'place-y' })` call and the `seed`/`recomputed` assertions) exactly as they were — only the `run(...)` actor and the title change.
 
 - [ ] **Step 5 (verify):** Run: `npm test -- ownership` then `npm test -- plants.service.edit` → Expected: PASS for all rewritten tests.
 
