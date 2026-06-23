@@ -223,7 +223,20 @@ Scheduling a move takes the destination as raw coordinates (`{ name, latitude, l
 timezone, moveOn }`), **find-or-creates** the owner's destination City by those coordinates rounded
 to 4 decimals, and stores a `ScheduledMove`. The what-if simulation takes just `{ latitude,
 longitude }` and prices the whole garden against that location without saving anything (the
-generalized `weather.forLocation` makes this possible for an unsaved spot). When the move's date
+generalized `weather.forLocation` makes this possible for an unsaved spot).
+
+**Empty-primary fallback (honest moving, made useful).** Normally `simulate` scopes to the plants
+whose place is in the current primary city — plants in other cities are not "with you", so the
+result excludes them. But `make-primary` (and `create` with `isPrimary: true`) flips the primary
+flag **without relocating places**, so a primary city can legitimately hold *none* of your plants;
+the old scoped query then returned `[]` even though plants existed. Now, **when the primary city
+holds zero of the owner's plants, `simulate` falls back to all of the owner's plants.** Either way,
+each result carries `placeCityName` (the plant's current city) and `inPrimaryCity` (whether that
+plant is in the current primary city), so the UI can warn per off-primary plant — *"This plant is
+not in your current city — it is in &lt;city&gt;."* The normal behavior is unchanged: when the
+primary **does** contain plants, only those are returned, all flagged `inPrimaryCity: true`.
+
+When the move's date
 arrives, the target city becomes primary, **outdoor places repoint** to it (indoor places don't — a
 room is still a room), and the whole garden recomputes. The apply step is idempotent via an
 `applied` flag, and the **startup hook** applies any move whose date has already passed.

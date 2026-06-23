@@ -98,7 +98,8 @@ list/detail, so adding the fields would only be never-read bloat).
 |---|---|---|---|
 | `POST /auth/login` | public | — | `{ username, password }` → `{ token, user: { username, role } }`. |
 | `POST /auth/logout` | bearer | — | Revokes the caller's current token (`jti` added to blocklist). |
-| `GET /auth/me` | bearer | — | Returns `{ username, role }` of the current actor. |
+| `GET /auth/me` | bearer | — | Returns `{ username, role, actingAs: { ownerId } \| null }` of the current actor (`actingAs` reports the resolved impersonation state). |
+| `GET /owners` | bearer | admin | Admin-only picker source for "Acting As" (403 for a USER). `[{ ownerId, username, role }]` (`role` is `null` for an owner with no linked user). Not owner-scoped — it *is* the picker; safety is the role gate. |
 | `GET /species` | public | — | Lightweight catalog `{ slug, scientificName, commonName }[]` consumed by the blog index and the "add plant" dropdown. |
 | `GET /species/:slug/brief` | public | — | `{ slug, scientificName, commonNames, briefEs, briefEn }`. `404` on unknown slug. |
 | `GET /species/:slug` | bearer | — | Full curated record (care data). Protected to minimise the public surface. |
@@ -107,7 +108,7 @@ list/detail, so adding the fields would only be never-read bloat).
 | `GET /plants/:id/viability-preview?placeId=` | bearer | owner | Read-only projected viability of the plant as if it lived in the given place. Used by the web edit modal before confirming a move. Writes nothing. |
 | `PATCH /places/:id` | bearer | owner | Body `{ name?, climateControlled? }`. A `climateControlled` change recomputes every plant in the place; a name-only change does not. |
 | `GET /cities/search?q=` | bearer | — | Open-Meteo geocoding proxy → `CitySearchResult[]`. Not owner-scoped (public reference data) but still login-gated. Degrades to `[]` on error. |
-| `POST /moving/simulate` | bearer | owner | Body `{ latitude, longitude }` → `PlantViability[]` for the plants at the current (primary) city only — plants in other cities are not "with you". Writes nothing. |
+| `POST /moving/simulate` | bearer | owner | Body `{ latitude, longitude }` → `PlantViability[]`, each carrying `placeCityName` + `inPrimaryCity`. Normally only the plants at the current (primary) city; **empty-primary fallback:** if the primary holds none of the owner's plants, it returns **all** the owner's plants (off-primary ones flagged `inPrimaryCity: false`) so the UI can warn per plant. Writes nothing. |
 | `POST /moving/schedule` | bearer | owner | Body `{ name, latitude, longitude, timezone, moveOn }`. Find-or-creates the destination City, then schedules the move. |
 
 ## Authentication / login wall
@@ -126,35 +127,53 @@ JWTs signed with `JWT_SECRET` (≥ 32 chars), TTL `JWT_EXPIRES_IN` (default `30d
 
 `nestjs-cls` (AsyncLocalStorage) establishes a per-request store before guards run. The `JwtAuthGuard` (registered as `APP_GUARD` — default-deny) writes the validated actor `{ userId, ownerId, role, jti, exp }` into the CLS store and also attaches it to `req.user`. Every service reads the actor from CLS via `OwnerService`:
 
-- `currentOwnerId()` — replaces the old hardcoded `"default"` lookup; throws if called outside a request.
-- `ownerFilter()` — returns `{ ownerId }` for USER, `{}` for ADMIN (the admin bypass for reads/single-row lookups only — see ownership rules below).
+- `currentOwnerId()` — replaces the old hardcoded `"default"` lookup; returns the **effective owner** (see below); throws if called outside a request.
+- `ownerFilter()` — always returns `{ ownerId: effectiveOwnerId }` (it **never** returns `{}` anymore — see the effective-owner model below).
+- `currentRole()` — the **real** token role; drives admin-only gating and is **never** affected by impersonation.
 
-### Ownership enforcement + admin bypass
+### The effective-owner model + admin "Acting As"
 
-The rule is per operation kind; a blind `where: {}` swap is unsafe for sweep and create operations:
+The old "ADMIN sees everything" bypass — where `ownerFilter()` returned `{}` for an admin and reads leaked **every** owner's rows — is **gone** (it was the root cause of the B7 multiple-primaries defect: each owner contributed a primary city, so the admin's personal list showed several "Primary" badges). Owner scoping is now centralized around **one** concept, the **effective owner** — "whose data am I operating on right now":
 
-- **Reads (list/single):** `where: { ...ownerFilter(), ... }` — a USER sees only their rows; an ADMIN sees all.
+```
+effectiveOwnerId = actingAsOwnerId ?? ownerId
+```
+
+- **Default (not impersonating):** the effective owner is your own owner, so **everyone — including admins — defaults to seeing only their own resources.**
+- **Acting as X:** the effective owner is X, so you read **and write** X's resources. Your **role never changes** while impersonating — you stay ADMIN, so you can stop or switch targets at any time.
+
+Because `currentOwnerId()` and `ownerFilter()` both return the effective owner, every owner-scoped service (plants, places, cities, feedback, notifications, care-plan, moving) inherits the model without per-service edits. The **only** extra privilege an admin retains is the ability to set `actingAsOwnerId` (via the role-gated header below).
+
+**How impersonation is carried (BFF sealed session + role-gated header):** identity stays in the JWT (unchanged); the "who am I viewing" state lives in the BFF's existing sealed server-side session as a top-level `actingAs` field (client-visible so the UI can render its banner). The Nuxt proxy forwards it to the API as an `X-Act-As-Owner: <ownerId>` request header. The `JwtAuthGuard` honors that header **only when the real token role is ADMIN** (a USER's header is ignored — no escalation), it validates that the target owner exists (a cheap PK lookup performed only while the header is present; unknown owner → controlled `ForbiddenException`/403, never a later FK/500 on the next create), and it stamps `actingAsOwnerId` onto the request actor. A fresh login always starts as yourself, "Stop acting as" returns you to yourself, and logout clears everything.
+
+Remaining per-operation-kind rules (unchanged in spirit, now all keyed off the effective owner):
+
+- **Reads (list/single):** `where: { ...ownerFilter(), ... }` — scoped to the effective owner.
 - **Single-row mutations:** first resolve the target row with `ownerFilter()` (access check), then mutate by `id`.
-- **Per-owner sweep mutations** (e.g., `makePrimary` resets all cities of one owner): derive the sweep scope from the **target resource's `ownerId`**, not from `ownerFilter()`, so an ADMIN acting on someone's data only sweeps that owner's rows.
-- **Creation:** the new resource is stamped with the actor's `ownerId`; create-time FK validation (e.g., a new plant's `placeId`) also checks against the actor's `ownerId` to prevent cross-owner dangling relations.
-- **`CarePlanController.recompute()`:** USER recomputes only their own garden; ADMIN may recompute all.
+- **Per-owner sweep mutations** (e.g., `makePrimary` resets all cities of one owner): derive the sweep scope from the **target resource's `ownerId`**, so a sweep only ever touches that owner's rows.
+- **Creation:** the new resource is stamped with the effective owner's `ownerId`; create-time FK validation (e.g., a new plant's `placeId`) also checks against the effective owner to prevent cross-owner dangling relations.
+- **`CarePlanController.recompute()`:** scopes to the **effective owner** (your own garden by default, the target's while acting-as). The all-owners recompute is **no longer reachable over HTTP** — it lives only in the startup/cron path (`applyAllDueMoves → recomputeAll`).
+
+The admin-only `GET /owners` endpoint is the impersonation picker source: it is gated on the **real** role (403 for a USER) and is intentionally **not** owner-scoped (it *is* the picker), selecting only safe user fields (never `passwordHash`). `GET /auth/me` reports the resolved `actingAs` state.
+
+**Frontend surfaces** (admin-only, rendered only for a real ADMIN session — a USER 404s on the page and never sees the menu entry): an `/admin/owners` picker page, an account-menu "Switch user" entry, a persistent "Acting as &lt;user&gt;" banner, and a "Stop acting as" control. Starting/stopping hard-reloads the app so every owner-scoped page refetches under the new effective owner.
 
 Users are created only via `npm run user:create` (no HTTP signup).
 
 ### System jobs — no actor
 
-System jobs (cron + startup boot hook) run outside any HTTP request and **never call `currentOwnerId()` / `ownerFilter()`**. `MovingService.applyAllDueMoves(now)` iterates `owner.findMany()` and calls `applyDueMovesForOwner(ownerId, now)` for each (per-owner timezone cutoff + `isPrimary` scoped to that owner; each move resolves the current primary **inside its own transaction** and repoints only that old-primary city's outdoor places, so a chain of due moves stays correct), then calls `recomputeAll()` once if any moves applied. `CarePlanService.recomputeAll()` already sweeps all plants with no owner filter. The cron and `StartupService` call `applyAllDueMoves` directly, never `applyDueMovesForOwner`.
+System jobs (cron + startup boot hook) run outside any HTTP request and **never call `currentOwnerId()` / `ownerFilter()`**. `MovingService.applyAllDueMoves(now)` iterates `owner.findMany()` and calls `applyDueMovesForOwner(ownerId, now)` for each (per-owner timezone cutoff + `isPrimary` scoped to that owner; each move resolves the current primary **inside its own transaction** and repoints only that old-primary city's outdoor places, so a chain of due moves stays correct), then calls `recomputeAll()` once if any moves applied. `CarePlanService.recomputeAll()` already sweeps all plants with no owner filter. The cron and `StartupService` call `applyAllDueMoves` directly, never `applyDueMovesForOwner`. This is the **only** path that recomputes all owners — the HTTP `POST /care-plan/recompute` is scoped to the effective owner (see the effective-owner model above).
 
 ### Public vs protected surface
 
 | Visibility | Endpoints |
 |---|---|
 | **Public (no auth)** | `POST /auth/login`; `GET /species` (lightweight catalog); `GET /species/:slug/brief` (blog article) |
-| **Protected (bearer required)** | Everything else — `GET /species/:slug` (full record), `plants/*`, `places/*`, `cities/*` (including `GET /cities/search` — not owner-filtered, but login-gated), `care-plan/*`, feedback, `moving/*`, `auth/logout`, `auth/me` |
+| **Protected (bearer required)** | Everything else — `GET /species/:slug` (full record), `plants/*`, `places/*`, `cities/*` (including `GET /cities/search` — not owner-filtered, but login-gated), `care-plan/*`, feedback, `moving/*`, `auth/logout`, `auth/me`, and the admin-only `GET /owners` |
 
 ### Web BFF (browser ↔ Nitro only)
 
-The browser never holds the JWT. `nuxt-auth-utils` seals the token inside an `httpOnly` session cookie under the **`secure`** sub-key (server-only; never serialized to the client). Nitro server routes handle login, logout, and a `me` check; a generic catch-all proxy (`server/api/[...].ts`) forwards every other request to the NestJS API, attaching `Authorization: Bearer <token>` from the session. `useApi` targets the same-origin proxy (`/api${path}`) and uses `useRequestFetch()` during SSR so the sealed session cookie is forwarded on server-side renders.
+The browser never holds the JWT. `nuxt-auth-utils` seals the token inside an `httpOnly` session cookie under the **`secure`** sub-key (server-only; never serialized to the client). Nitro server routes handle login, logout, and a `me` check; a generic catch-all proxy (`server/api/[...].ts`) forwards every other request to the NestJS API, attaching `Authorization: Bearer <token>` from the session. When the session carries an `actingAs` target (set by the admin via `POST /api/acting-as` and cleared by `DELETE /api/acting-as`), the proxy also forwards `X-Act-As-Owner: <ownerId>`. The set/clear routes resolve the target label **server-side** and require a real ADMIN session; clearing rebuilds the session passing `actingAs: null` explicitly (the nuxt-auth-utils/h3 `defu` merge would otherwise let a stale `actingAs` survive), so a fresh login, a stop, and a logout all reliably drop impersonation. `useApi` targets the same-origin proxy (`/api${path}`) and uses `useRequestFetch()` during SSR so the sealed session cookie is forwarded on server-side renders.
 
 ## One data store (local MariaDB)
 

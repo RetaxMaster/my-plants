@@ -65,6 +65,13 @@ Editing surfaces and honest location semantics (no DB migration — all fields a
 - **Web:** edit modals on the plant detail page (with preview) and the places list.
 - **Frontend redesign:** the web UI was rebuilt on an in-house design system imported from Claude Design (CSS tokens + reusable Vue components), replacing Nuxt UI/Tailwind. Adds light/dark mode, a responsive auth-aware nav (desktop top row, mobile bottom bar + More), and self-hosted fonts/icons (offline). i18n deferred (strings stay English in place).
 
+## Phase 8 — Admin "Acting As" + honest-moving fallback (done, 2026-06-22)
+
+Two pre-existing backend defects surfaced during the Phase 7 frontend-redesign QA (B7, B8), now fixed (no DB migration — no schema change):
+
+- **B7 — effective-owner model + admin "Acting As":** the old "ADMIN sees everything" (`OwnerService.ownerFilter()` returned `{}` for admins, leaking every owner's rows and showing multiple primary cities) is **removed**. Owner scoping is centralized on a single concept, the **effective owner** (`actingAsOwnerId ?? ownerId`), so admins now default to their own resources. Cross-owner reach comes **only** from explicit impersonation: the target lives in the BFF sealed session, the Nuxt proxy forwards it as `X-Act-As-Owner`, and the `JwtAuthGuard` honors it only for a real ADMIN token (validates the owner exists → 403 otherwise; the gating role is always the real token role). New admin-only `GET /owners` picker; `GET /auth/me` now reports `actingAs`. Web: an admin-only `/admin/owners` page + account-menu "Switch user" entry (neither renders for a USER), a persistent "Acting as &lt;user&gt;" banner, and "Stop acting as"; start/stop hard-reload so every owner-scoped page refetches.
+- **B8 — honest-moving fallback:** `POST /moving/simulate` no longer returns `[]` when the primary city holds none of the owner's plants — it falls back to all the owner's plants, and each result carries `placeCityName` + `inPrimaryCity` so the UI warns per off-primary plant. Normal behavior (primary has plants → only those) is unchanged. `POST /care-plan/recompute` is re-scoped to the effective owner; the all-owners recompute remains only in the startup/cron path, never over HTTP.
+
 ## What's next — production deployment
 
 The login wall is the last prerequisite for a public deployment. **Production deployment is the
@@ -76,6 +83,6 @@ gating, and service restart procedure. Do NOT improvise a deploy flow without th
 ## Deferred (not in the MVP)
 
 - AI photo diagnosis inside the feedback loop.
-- `docs/api/` + Postman collection (created once the API is real and functional).
+- Postman collection (the Markdown API collection now lives in `docs/api/README.md`; a Postman export is still deferred).
 - Multi-user self-service (the seam exists; real multi-tenancy comes later — single real user for now).
 - Production deploy flow (see above — needs `docs/deploy.md` first).

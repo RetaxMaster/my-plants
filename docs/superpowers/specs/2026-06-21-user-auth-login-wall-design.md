@@ -297,6 +297,11 @@ by operation kind:
   `recomputeOwner(ownerId)` that filters plants by owner); an **ADMIN** may recompute all
   (`recomputeAll()`). The owner-agnostic `recomputeAll()` stays for system jobs (§4.4a).
 
+  > **Superseded by the 2026-06-22 acting-as wave:** HTTP `POST /care-plan/recompute` is now
+  > re-scoped to the **effective owner** (own by default; the target while acting-as) — an ADMIN can
+  > no longer recompute *all* owners over HTTP. The all-owners `recomputeAll()` remains, but only in
+  > the cron/startup path. See `docs/superpowers/specs/2026-06-22-acting-as-and-honest-moving-fallback-design.md`.
+
 `cities/search` is **not owner-scoped** (it proxies public geocoding reference data, not the owner's
 saved cities) but it is **still authenticated** (no `@Public()`): "not owner-filtered" ≠ "open without
 login". The existing in-code comment that calls it "public reference data" is about *ownership*, not

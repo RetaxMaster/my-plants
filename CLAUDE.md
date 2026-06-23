@@ -136,7 +136,7 @@ All documentation lives in `docs/`. When a rule above says "see `docs/…`", the
 | Roadmap | `docs/mvp-roadmap.md` |
 | Multi-repo / submodule mechanics | `docs/multirepo-submodules.md` |
 | Deploy | *(not defined yet — local-only v1)* |
-| API collection | `docs/api/` *(pending — create once the API exists)* |
+| API collection | `docs/api/README.md` |
 | Frontend design system & component library | `docs/frontend-design-system.md` |
 | Design specs & plans | `docs/superpowers/specs/`, `docs/superpowers/plans/` |
 
