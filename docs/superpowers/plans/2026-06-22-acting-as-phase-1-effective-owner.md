@@ -163,7 +163,13 @@ git commit -m "feat(auth): AuthService.ownerExists for act-as validation"
 - Modify: `src/auth/jwt-auth.guard.ts`
 - Modify: `src/auth/jwt-auth.guard.test.ts`
 
-- [ ] **Step 1: Write the failing tests.** In `src/auth/jwt-auth.guard.test.ts`, extend the `authSvc` fake to also verify an admin token and to answer `ownerExists`, then add acting-as cases. Replace the existing `authSvc` const with:
+- [ ] **Step 1: Write the failing tests.** In `src/auth/jwt-auth.guard.test.ts`, first add the exception import at the top (next to the existing imports):
+
+```ts
+import { ForbiddenException } from '@nestjs/common';
+```
+
+Then extend the `authSvc` fake to also verify an admin token and to answer `ownerExists`, then add acting-as cases. Replace the existing `authSvc` const with:
 
 ```ts
 const authSvc = {
@@ -179,7 +185,7 @@ const authSvc = {
 Add these tests inside the `describe('JwtAuthGuard', ...)` block:
 
 ```ts
-  const ctxWith = (auth: string, actAs?: string) => {
+  const ctxWith = (auth: string, actAs?: string | string[]) => {
     const req = { headers: { authorization: auth, ...(actAs !== undefined ? { 'x-act-as-owner': actAs } : {}) } } as any;
     return {
       req,
@@ -197,11 +203,20 @@ Add these tests inside the `describe('JwtAuthGuard', ...)` block:
     });
   });
 
-  it('an ADMIN acting-as an unknown owner is rejected (403)', async () => {
+  it('an ADMIN acting-as an unknown owner is rejected with ForbiddenException (403)', async () => {
     const g = new JwtAuthGuard(reflector(false), authSvc, cls);
     await cls.run(async () => {
       const { context } = ctxWith('Bearer admin', 'ghost');
-      await expect(g.canActivate(context)).rejects.toThrow();
+      await expect(g.canActivate(context)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  it('an array x-act-as-owner is ignored for an ADMIN (not a single string)', async () => {
+    const g = new JwtAuthGuard(reflector(false), authSvc, cls);
+    await cls.run(async () => {
+      const { req, context } = ctxWith('Bearer admin', ['oTarget']);
+      expect(await g.canActivate(context)).toBe(true);
+      expect(req.user.actingAsOwnerId).toBeUndefined();
     });
   });
 

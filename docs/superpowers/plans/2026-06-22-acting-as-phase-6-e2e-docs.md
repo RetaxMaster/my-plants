@@ -54,7 +54,12 @@
 - [ ] **Step 1:** In `docs/architecture.md`, document the **effective-owner / Acting As** model: an admin defaults to own-scope (the old "ADMIN sees all" `{}` is gone); admin reach across owners comes only from impersonation carried by the role-gated `X-Act-As-Owner` header (set in the BFF sealed session, validated in the guard); role is always the real token role.
 - [ ] **Step 2:** In `docs/care-engine.md`, near the Moving section, document the **empty-primary simulate fallback**: when the primary city holds none of the owner's plants, `simulate` returns all owner plants with per-plant `placeCityName` + `inPrimaryCity` so the UI warns; the normal "only current-city plants" behavior is unchanged.
 - [ ] **Step 3:** In `docs/mvp-roadmap.md`, mark the B7/B8 fixes (admin Acting As + honest-moving fallback) done.
-- [ ] **Step 4:** If `docs/api/` exists, add: `GET /owners` (admin-only), the `X-Act-As-Owner` request header semantics, `GET /auth/me` `actingAs`, and the new `simulate` response fields (`placeCityName`, `inPrimaryCity`). If `docs/api/` does not exist yet, note these endpoints in `docs/architecture.md` instead and skip creating the collection here.
+- [ ] **Step 4:** Update the **API collection** under `docs/api/` (the API exists and this wave changes its contract, so document it rather than defer). If `docs/api/` already exists, add/extend its entries; if it does not exist yet, create `docs/api/README.md` to seed the collection with these endpoints (a simple per-endpoint Markdown table: method, path, auth, request, response). Document:
+  - `GET /owners` — admin-only (403 for a USER); response `[{ ownerId, username, role }]`.
+  - The `X-Act-As-Owner: <ownerId>` request header — honored only for an ADMIN token; unknown owner → 403; sets the effective owner for that request.
+  - `GET /auth/me` — now returns `{ username, role, actingAs: { ownerId } | null }`.
+  - `POST /moving/simulate` — each result now includes `placeCityName` and `inPrimaryCity`; behavior note on the empty-primary fallback.
+  - `POST /care-plan/recompute` — now scopes to the effective owner (no all-owners recompute over HTTP).
 - [ ] **Step 5: Commit (ROOT repo).**
 
 ```bash
