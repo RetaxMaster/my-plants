@@ -50,7 +50,10 @@ Flow:
 
 ### 4.1 Actor + guard
 - `src/auth/actor.ts`: add optional `actingAsOwnerId?: string` to `Actor`.
-- `src/auth/jwt-auth.guard.ts`: read the `x-act-as-owner` request header; set `actor.actingAsOwnerId` **only when `actor.role === 'ADMIN'`** and the header is a non-empty string. The header value is trusted only as a scoping target — an admin pointing at a non-existent owner simply sees empty results (no security impact), so no per-request existence check is required.
+- `src/auth/jwt-auth.guard.ts`: read the `x-act-as-owner` request header and set `actor.actingAsOwnerId` only when **all** of:
+  - `actor.role === 'ADMIN'` (a USER's header is ignored — no escalation), and
+  - the header is a **single non-empty string** after trimming: `typeof header === 'string' && header.trim().length > 0` (ignore arrays and empty/whitespace values; store the trimmed value). This makes the direct-`:8000` invariant precise and testable.
+  - **the target owner exists.** The guard performs a cheap PK lookup (`owner.findUnique({ where: { id } })`) **only when the header is present** (i.e. only while impersonating — negligible cost). If the owner does not exist, reject with a **controlled `ForbiddenException` (403)** rather than silently scoping to a non-existent owner. Rationale (per review): writes stamp the effective owner into FK-backed rows (`City.ownerId → Owner.id`, etc.), so a bogus target would otherwise surface as a Prisma FK error / 500 on the next create (e.g. `MovingService.schedule`), not as "empty results." Validating in the guard converts that into a clean, early 403. (The normal flow never reaches this: the BFF set-route in §5.1 only stores owner ids drawn from `GET /owners`; this guard check defends the direct-API edge.)
 
 ### 4.2 OwnerService (`src/owner/owner.service.ts`)
 - Add `currentEffectiveOwnerId()` (private or public helper): `actor.actingAsOwnerId ?? actor.ownerId`.
@@ -88,7 +91,7 @@ No new tables, no Prisma migration, no env changes. Audit was explicitly dropped
 
 ### 5.1 BFF routes + proxy
 - `POST /api/acting-as` (`server/api/acting-as.post.ts`): require the session user to be ADMIN (else 403); take `{ ownerId }`; resolve the label **server-side** from `GET /owners` (do not trust a client-supplied label); store `actingAsOwnerId` + `actingAsLabel` in the session via `setUserSession` (merging existing `secure.token`).
-- `DELETE /api/acting-as` (`server/api/acting-as.delete.ts`): clear the impersonation fields from the session.
+- `DELETE /api/acting-as` (`server/api/acting-as.delete.ts`): clear the impersonation fields. **Note (per review): `setUserSession` merges via `defu`, so omitting a field does NOT remove it.** Clearing must rebuild the session with `replaceUserSession(event, { user, secure: { token } })` — preserving the identity (`user`) and `secure.token` while dropping `actingAsOwnerId`/`actingAsLabel`. (Alternatively set both fields to `null` and have the proxy treat only a truthy `actingAsOwnerId` as active — but `replaceUserSession` is the clean, unambiguous choice.)
 - Catch-all proxy `server/api/[...].ts`: when the session has `actingAsOwnerId`, add `X-Act-As-Owner: <id>` to the forwarded headers.
 - `server/api/auth/me.get.ts`: include the session's `actingAs: { ownerId, label } | null` in its response so the client renders the banner without an extra round-trip.
 
@@ -118,6 +121,7 @@ No new tables, no Prisma migration, no env changes. Audit was explicitly dropped
 
 - **API (unit, Vitest):**
   - Effective owner: USER scoped to own; ADMIN with no header scoped to own (**new** — replaces "admin sees all"); ADMIN with `x-act-as-owner` reads **and** writes the target; USER with the header is ignored (stays own-scoped).
+  - Guard hardening: ADMIN with `x-act-as-owner` pointing at a **non-existent** owner → `ForbiddenException` (403), not a later FK/500; header that is an array, empty, or whitespace-only → ignored (admin stays own-scoped); a valid header value is trimmed before use.
   - `GET /owners`: 403 for a USER; full list for an ADMIN; label fallback when an owner has no user.
   - `simulate` fallback: primary with plants → only those (`inPrimaryCity` all true); primary empty → all plants with off-primary flagged false + correct `placeCityName`; no primary → all, all true.
   - Rewrite the existing ownership tests (cities/plants/places) to the effective-owner model.
