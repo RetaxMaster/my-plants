@@ -49,7 +49,7 @@
 - Modify: `docs/architecture.md`
 - Modify: `docs/care-engine.md`
 - Modify: `docs/mvp-roadmap.md`
-- Modify: `docs/api/` collection (only if it exists)
+- Create or modify: `docs/api/` collection (seed `docs/api/README.md` if absent)
 
 - [ ] **Step 1:** In `docs/architecture.md`, document the **effective-owner / Acting As** model: an admin defaults to own-scope (the old "ADMIN sees all" `{}` is gone); admin reach across owners comes only from impersonation carried by the role-gated `X-Act-As-Owner` header (set in the BFF sealed session, validated in the guard); role is always the real token role.
 - [ ] **Step 2:** In `docs/care-engine.md`, near the Moving section, document the **empty-primary simulate fallback**: when the primary city holds none of the owner's plants, `simulate` returns all owner plants with per-plant `placeCityName` + `inPrimaryCity` so the UI warns; the normal "only current-city plants" behavior is unchanged.
